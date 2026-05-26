@@ -639,6 +639,7 @@ namespace PcbPoseAlignInspect.Forms
 					{
 						_canvas.BoardContour = new PointF[0];
 						SetStatus("轮廓提取异常", Color.Firebrick);
+						MessageBox.Show(this, "轮廓提取异常: " + GetTaskError(task), "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
 					}
 					else
 					{
