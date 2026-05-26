@@ -90,7 +90,7 @@ namespace PcbPoseAlignInspect.Models
 			FeatureSearchRoi = RectangleF.Empty;
 			FeatureTemplateRoi = RectangleF.Empty;
 			FeatureRoiShape = FeatureRoiShape.Rectangle;
-			FeatureMatchMinScore = 0.75;
+			FeatureMatchMinScore = 0.45;
 			TeachFeatureCenter = PointF.Empty;
 			FeatureToBoardOffset = PointF.Empty;
 			FeatureTemplateImagePng = null;

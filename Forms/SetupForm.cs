@@ -253,6 +253,7 @@ namespace PcbPoseAlignInspect.Forms
 			_cmbFeatureShape.Items.Add(FeatureRoiShape.Circle);
 			featureGroup.Controls.Add(_cmbFeatureShape);
 			_numFeatureMinScore = AddSingleNumericRow(featureGroup, "最小分数", 140, 0m, 1m, 2);
+			SetTip(_numFeatureMinScore, "外轮廓模板的通过分数。调试时建议先用0.30到0.45，稳定后再逐步提高。");
 
 			y += 218;
 			GroupBox resultGroup = AddGroup(resultPage, "4. 运行结果", y, 220);

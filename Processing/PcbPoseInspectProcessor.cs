@@ -46,6 +46,8 @@ namespace PcbPoseAlignInspect.Processing
 			public PointF[] Contour;
 
 			public bool CandidateFound;
+
+			public string Message;
 		}
 
 		public PcbPoseInspectResult Teach(Bitmap image, PcbPoseInspectRecipe recipe)
@@ -279,7 +281,7 @@ namespace PcbPoseAlignInspect.Processing
 						featureMatch = MatchFeatureTemplate(hObject, bitmap2.Width, bitmap2.Height, recipe);
 						if (!featureMatch.CandidateFound)
 						{
-							error = "未找到特征模板候选，请检查特征搜索ROI是否覆盖目标、模板ROI是否包含清晰外轮廓";
+							error = string.IsNullOrEmpty(featureMatch.Message) ? "未找到特征模板候选，请检查特征搜索ROI是否覆盖目标、模板ROI是否包含清晰外轮廓" : featureMatch.Message;
 							return false;
 						}
 						if (featureMatch.Ok)
@@ -524,7 +526,8 @@ namespace PcbPoseAlignInspect.Processing
 				return new FeatureMatch
 				{
 					Ok = false,
-					Score = 0.0
+					Score = 0.0,
+					Message = "特征模板为空，请先保存特征模板"
 				};
 			}
 			Rectangle rectangle = ToClippedRectangle(recipe.FeatureSearchRoi, width, height);
@@ -539,7 +542,8 @@ namespace PcbPoseAlignInspect.Processing
 					return new FeatureMatch
 					{
 						Ok = false,
-						Score = 0.0
+						Score = 0.0,
+						Message = "特征模板图像无效，请重新框选并保存模板"
 					};
 				}
 				using (Bitmap bitmap2 = To24bpp(bitmap))
@@ -560,18 +564,19 @@ namespace PcbPoseAlignInspect.Processing
 						HOperatorSet.Rgb1ToGray(hObject, out grayImage);
 						CreateFeatureRegion(out region, new RectangleF(0f, 0f, bitmap2.Width, bitmap2.Height), recipe.FeatureRoiShape);
 						HOperatorSet.ReduceDomain(grayImage, region, out imageReduced);
-						HOperatorSet.CreateShapeModel(imageReduced, "auto", -0.523599, 1.047198, "auto", "auto", "use_polarity", "auto", "auto", out modelID);
+						HOperatorSet.CreateShapeModel(imageReduced, 4, -0.785398, 1.570796, "auto", "auto", "ignore_global_polarity", "auto", "auto", out modelID);
 						HOperatorSet.Rgb1ToGray(hoImage, out grayImage2);
 						HOperatorSet.GenRectangle1(out searchRegion, rectangle.Top, rectangle.Left, Math.Max(rectangle.Top, rectangle.Bottom - 1), Math.Max(rectangle.Left, rectangle.Right - 1));
 						HOperatorSet.ReduceDomain(grayImage2, searchRegion, out imageReduced2);
-						HOperatorSet.FindShapeModel(imageReduced2, modelID, -0.523599, 1.047198, 0.2, 1, 0.5, "least_squares", 0, 0.8, out var row, out var column, out var angle, out var score);
+						HOperatorSet.FindShapeModel(imageReduced2, modelID, -0.785398, 1.570796, 0.05, 1, 0.5, "least_squares", 0, 0.9, out var row, out var column, out var angle, out var score);
 						if (score == null || score.Length <= 0)
 						{
 							return new FeatureMatch
 							{
 								Ok = false,
 								Score = 0.0,
-								CandidateFound = false
+								CandidateFound = false,
+								Message = "未找到特征模板候选。建议把最小分数先调到0.30，并确认搜索ROI覆盖目标、模板ROI只框清晰外轮廓。"
 							};
 						}
 						PointF center = new PointF((float)column.D, (float)row.D);
@@ -591,15 +596,18 @@ namespace PcbPoseAlignInspect.Processing
 							Center = center,
 							Bounds = bounds,
 							Contour = contour,
-							CandidateFound = true
+							CandidateFound = true,
+							Message = "找到候选"
 						};
 					}
-					catch
+					catch (Exception ex)
 					{
 						return new FeatureMatch
 						{
 							Ok = false,
-							Score = 0.0
+							Score = 0.0,
+							CandidateFound = false,
+							Message = "特征模板匹配异常: " + ex.Message
 						};
 					}
 					finally
