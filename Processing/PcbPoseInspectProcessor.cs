@@ -39,6 +39,8 @@ namespace PcbPoseAlignInspect.Processing
 
 			public double Score;
 
+			public double Scale;
+
 			public PointF Center;
 
 			public RectangleF Bounds;
@@ -557,18 +559,30 @@ namespace PcbPoseAlignInspect.Processing
 					HObject imageReduced2 = null;
 					HObject modelContours = null;
 					HObject transformedContours = null;
+					HObject templateProcessed = null;
+					HObject templateReduced = null;
+					HObject matchProcessed = null;
 					HTuple modelID = null;
 					try
 					{
 						hObject = CreateHalconImageFromBitmap(bitmap2);
 						HOperatorSet.Rgb1ToGray(hObject, out grayImage);
+						int templateMean = Math.Max(1, recipe.FeatureTemplateMeanSize);
+						HOperatorSet.MeanImage(grayImage, out templateProcessed, templateMean, templateMean);
 						CreateFeatureRegion(out region, new RectangleF(0f, 0f, bitmap2.Width, bitmap2.Height), recipe.FeatureRoiShape);
-						HOperatorSet.ReduceDomain(grayImage, region, out imageReduced);
-						HOperatorSet.CreateShapeModel(imageReduced, 4, -0.785398, 1.570796, "auto", "auto", "ignore_global_polarity", "auto", "auto", out modelID);
+						HOperatorSet.ReduceDomain(templateProcessed, region, out templateReduced);
+						HOperatorSet.CropDomain(templateReduced, out imageReduced);
+						double scaleMin = Math.Max(0.05, Math.Min(recipe.FeatureScaleMin, recipe.FeatureScaleMax));
+						double scaleMax = Math.Max(scaleMin, Math.Max(recipe.FeatureScaleMin, recipe.FeatureScaleMax));
+						HOperatorSet.CreateScaledShapeModel(imageReduced, "auto", 0.0, new HTuple(360).TupleRad(), "auto", scaleMin, scaleMax, "auto", "auto", "use_polarity", "auto", 2, out modelID);
 						HOperatorSet.Rgb1ToGray(hoImage, out grayImage2);
+						int matchMean = Math.Max(1, recipe.FeatureMatchMeanSize);
+						HOperatorSet.MeanImage(grayImage2, out matchProcessed, matchMean, matchMean);
 						HOperatorSet.GenRectangle1(out searchRegion, rectangle.Top, rectangle.Left, Math.Max(rectangle.Top, rectangle.Bottom - 1), Math.Max(rectangle.Left, rectangle.Right - 1));
-						HOperatorSet.ReduceDomain(grayImage2, searchRegion, out imageReduced2);
-						HOperatorSet.FindShapeModel(imageReduced2, modelID, -0.785398, 1.570796, 0.05, 1, 0.5, "least_squares", 0, 0.9, out var row, out var column, out var angle, out var score);
+						HOperatorSet.ReduceDomain(matchProcessed, searchRegion, out imageReduced2);
+						double minScore = Math.Max(0.01, Math.Min(1.0, recipe.FeatureMatchMinScore));
+						double greediness = Math.Max(0.0, Math.Min(1.0, recipe.FeatureGreediness));
+						HOperatorSet.FindScaledShapeModel(imageReduced2, modelID, 0.0, new HTuple(360).TupleRad(), scaleMin, scaleMax, minScore, 1, 0.5, "none", 0, greediness, out var row, out var column, out var angle, out var scale, out var score);
 						if (score == null || score.Length <= 0)
 						{
 							return new FeatureMatch
@@ -576,12 +590,15 @@ namespace PcbPoseAlignInspect.Processing
 								Ok = false,
 								Score = 0.0,
 								CandidateFound = false,
-								Message = "未找到特征模板候选。建议把最小分数先调到0.30，并确认搜索ROI覆盖目标、模板ROI只框清晰外轮廓。"
+								Message = "未找到特征模板候选。建议降低最小分数，放宽缩放范围，并确认搜索ROI覆盖目标。"
 							};
 						}
 						PointF center = new PointF((float)column.D, (float)row.D);
 						HOperatorSet.GetShapeModelContours(out modelContours, modelID, 1);
-						HOperatorSet.VectorAngleToRigid(0.0, 0.0, 0.0, row.D, column.D, angle.D, out var homMat2D);
+						HOperatorSet.HomMat2dIdentity(out var homMat2DIdentity);
+						HOperatorSet.HomMat2dScale(homMat2DIdentity, scale.D, scale.D, 0.0, 0.0, out var homMat2DScale);
+						HOperatorSet.HomMat2dRotate(homMat2DScale, angle.D, 0.0, 0.0, out var homMat2DRotate);
+						HOperatorSet.HomMat2dTranslate(homMat2DRotate, row.D, column.D, out var homMat2D);
 						HOperatorSet.AffineTransContourXld(modelContours, out transformedContours, homMat2D);
 						PointF[] contour = XldToContourPoints(transformedContours, 1200);
 						RectangleF bounds = BoundsOf(contour);
@@ -593,6 +610,7 @@ namespace PcbPoseAlignInspect.Processing
 						{
 							Ok = (score.D >= recipe.FeatureMatchMinScore),
 							Score = score.D,
+							Scale = scale.D,
 							Center = center,
 							Bounds = bounds,
 							Contour = contour,
@@ -631,6 +649,9 @@ namespace PcbPoseAlignInspect.Processing
 						DisposeObj(imageReduced2);
 						DisposeObj(modelContours);
 						DisposeObj(transformedContours);
+						DisposeObj(templateProcessed);
+						DisposeObj(templateReduced);
+						DisposeObj(matchProcessed);
 					}
 				}
 			}

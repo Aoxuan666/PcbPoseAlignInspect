@@ -54,6 +54,16 @@ namespace PcbPoseAlignInspect.Models
 
 		public double FeatureMatchMinScore { get; set; }
 
+		public int FeatureTemplateMeanSize { get; set; }
+
+		public int FeatureMatchMeanSize { get; set; }
+
+		public double FeatureScaleMin { get; set; }
+
+		public double FeatureScaleMax { get; set; }
+
+		public double FeatureGreediness { get; set; }
+
 		public PointF TeachFeatureCenter { get; set; }
 
 		public PointF FeatureToBoardOffset { get; set; }
@@ -91,6 +101,11 @@ namespace PcbPoseAlignInspect.Models
 			FeatureTemplateRoi = RectangleF.Empty;
 			FeatureRoiShape = FeatureRoiShape.Rectangle;
 			FeatureMatchMinScore = 0.45;
+			FeatureTemplateMeanSize = 8;
+			FeatureMatchMeanSize = 5;
+			FeatureScaleMin = 0.6;
+			FeatureScaleMax = 1.2;
+			FeatureGreediness = 0.8;
 			TeachFeatureCenter = PointF.Empty;
 			FeatureToBoardOffset = PointF.Empty;
 			FeatureTemplateImagePng = null;
@@ -132,6 +147,11 @@ namespace PcbPoseAlignInspect.Models
 				FeatureTemplateRoi = FeatureTemplateRoi,
 				FeatureRoiShape = FeatureRoiShape,
 				FeatureMatchMinScore = FeatureMatchMinScore,
+				FeatureTemplateMeanSize = FeatureTemplateMeanSize,
+				FeatureMatchMeanSize = FeatureMatchMeanSize,
+				FeatureScaleMin = FeatureScaleMin,
+				FeatureScaleMax = FeatureScaleMax,
+				FeatureGreediness = FeatureGreediness,
 				TeachFeatureCenter = TeachFeatureCenter,
 				FeatureToBoardOffset = FeatureToBoardOffset,
 				FeatureTemplateImagePng = CloneBytes(FeatureTemplateImagePng),

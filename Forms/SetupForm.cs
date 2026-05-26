@@ -51,6 +51,11 @@ namespace PcbPoseAlignInspect.Forms
 		private NumericUpDown _numGreenBlueDiff;
 		private NumericUpDown _numRedMax;
 		private NumericUpDown _numFeatureMinScore;
+		private NumericUpDown _numFeatureTemplateMean;
+		private NumericUpDown _numFeatureMatchMean;
+		private NumericUpDown _numFeatureScaleMin;
+		private NumericUpDown _numFeatureScaleMax;
+		private NumericUpDown _numFeatureGreediness;
 		private CheckBox _chkFillUp;
 		private CheckBox _chkUseConvexHull;
 		private CheckBox _chkBoardRoi;
@@ -234,7 +239,7 @@ namespace PcbPoseAlignInspect.Forms
 			UpdateSegmentationFeedback(null);
 
 			y = 8;
-			GroupBox featureGroup = AddGroup(resultPage, "3. 特征模板定位", y, 210);
+			GroupBox featureGroup = AddGroup(resultPage, "3. 特征模板定位", y, 312);
 			AddButton(featureGroup, "画搜索ROI", 12, 28, 122, 30, delegate
 			{
 				RequireImageThenSetMode(PoseInspectCanvas.CanvasTeachMode.DrawFeatureSearchRoi);
@@ -254,8 +259,17 @@ namespace PcbPoseAlignInspect.Forms
 			featureGroup.Controls.Add(_cmbFeatureShape);
 			_numFeatureMinScore = AddSingleNumericRow(featureGroup, "最小分数", 140, 0m, 1m, 2);
 			SetTip(_numFeatureMinScore, "外轮廓模板的通过分数。调试时建议先用0.30到0.45，稳定后再逐步提高。");
+			_numFeatureTemplateMean = AddSingleNumericRow(featureGroup, "模板滤波", 174, 1m, 31m, 0);
+			SetTip(_numFeatureTemplateMean, "保存模板时的均值滤波尺寸。值越大越平滑，能减弱噪声，也可能抹掉细边。");
+			_numFeatureMatchMean = AddSingleNumericRow(featureGroup, "匹配滤波", 208, 1m, 31m, 0);
+			SetTip(_numFeatureMatchMean, "运行匹配时的均值滤波尺寸。光照噪声大可以适当调高。");
+			_numFeatureScaleMin = AddDoubleNumericRow(featureGroup, "缩放下限", "上限", 242, 0.2m, 3m, 2, out _numFeatureScaleMax);
+			SetTip(_numFeatureScaleMin, "允许模板缩小到多少倍。目标大小变化不大时可接近1.00。");
+			SetTip(_numFeatureScaleMax, "允许模板放大到多少倍。目标大小变化不大时可接近1.00。");
+			_numFeatureGreediness = AddSingleNumericRow(featureGroup, "贪婪度", 276, 0m, 1m, 2);
+			SetTip(_numFeatureGreediness, "匹配搜索速度参数。越高越快但可能漏检，找不到时可调到0.6到0.8。");
 
-			y += 218;
+			y += 320;
 			GroupBox resultGroup = AddGroup(resultPage, "4. 运行结果", y, 220);
 			AddLabel(resultGroup, "统一公差(px)", 12, 30, 118);
 			_numTolerance = AddNumeric(resultGroup, 132, 26, 136, 0m, 9999m, 2);
@@ -323,6 +337,11 @@ namespace PcbPoseAlignInspect.Forms
 					_cmbFeatureShape.SelectedIndex = 0;
 				}
 				_numFeatureMinScore.Value = ToDecimal(CurrentRecipe.FeatureMatchMinScore, _numFeatureMinScore.Minimum, _numFeatureMinScore.Maximum);
+				_numFeatureTemplateMean.Value = ToDecimal(CurrentRecipe.FeatureTemplateMeanSize, _numFeatureTemplateMean.Minimum, _numFeatureTemplateMean.Maximum);
+				_numFeatureMatchMean.Value = ToDecimal(CurrentRecipe.FeatureMatchMeanSize, _numFeatureMatchMean.Minimum, _numFeatureMatchMean.Maximum);
+				_numFeatureScaleMin.Value = ToDecimal(CurrentRecipe.FeatureScaleMin, _numFeatureScaleMin.Minimum, _numFeatureScaleMin.Maximum);
+				_numFeatureScaleMax.Value = ToDecimal(CurrentRecipe.FeatureScaleMax, _numFeatureScaleMax.Minimum, _numFeatureScaleMax.Maximum);
+				_numFeatureGreediness.Value = ToDecimal(CurrentRecipe.FeatureGreediness, _numFeatureGreediness.Minimum, _numFeatureGreediness.Maximum);
 				_canvas.BoardSearchRoi = CurrentRecipe.BoardSearchRoi;
 				_canvas.EnableBoardSearchRoi = CurrentRecipe.EnableBoardSearchRoi;
 				_canvas.FeatureSearchRoi = CurrentRecipe.FeatureSearchRoi;
@@ -360,6 +379,11 @@ namespace PcbPoseAlignInspect.Forms
 			CurrentRecipe.EnableFeatureTemplateMatch = _chkFeatureMatch.Checked;
 			CurrentRecipe.FeatureRoiShape = _cmbFeatureShape.SelectedItem is FeatureRoiShape ? (FeatureRoiShape)_cmbFeatureShape.SelectedItem : FeatureRoiShape.Rectangle;
 			CurrentRecipe.FeatureMatchMinScore = (double)_numFeatureMinScore.Value;
+			CurrentRecipe.FeatureTemplateMeanSize = Math.Max(1, (int)_numFeatureTemplateMean.Value);
+			CurrentRecipe.FeatureMatchMeanSize = Math.Max(1, (int)_numFeatureMatchMean.Value);
+			CurrentRecipe.FeatureScaleMin = Math.Min((double)_numFeatureScaleMin.Value, (double)_numFeatureScaleMax.Value);
+			CurrentRecipe.FeatureScaleMax = Math.Max((double)_numFeatureScaleMin.Value, (double)_numFeatureScaleMax.Value);
+			CurrentRecipe.FeatureGreediness = (double)_numFeatureGreediness.Value;
 			CurrentRecipe.FeatureSearchRoi = _canvas.FeatureSearchRoi;
 			CurrentRecipe.FeatureTemplateRoi = _canvas.FeatureTemplateRoi;
 			_canvas.FeatureRoiShape = CurrentRecipe.FeatureRoiShape;
@@ -800,6 +824,11 @@ namespace PcbPoseAlignInspect.Forms
 			_chkFeatureMatch.CheckedChanged += featureChanged;
 			_cmbFeatureShape.SelectedIndexChanged += featureChanged;
 			_numFeatureMinScore.ValueChanged += featureChanged;
+			_numFeatureTemplateMean.ValueChanged += featureChanged;
+			_numFeatureMatchMean.ValueChanged += featureChanged;
+			_numFeatureScaleMin.ValueChanged += featureChanged;
+			_numFeatureScaleMax.ValueChanged += featureChanged;
+			_numFeatureGreediness.ValueChanged += featureChanged;
 			_numTolerance.ValueChanged += toleranceChanged;
 		}
 
