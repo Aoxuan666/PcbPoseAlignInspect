@@ -856,13 +856,30 @@ namespace PcbPoseAlignInspect.Forms
 				return;
 			}
 
-			SetStatus(result.Success ? "OK" : "NG - " + result.NgReasonText, result.Success ? Color.SeaGreen : Color.Firebrick);
+			SetStatus(result.Success ? "OK" : BuildResultStatusText(result), result.Success ? Color.SeaGreen : Color.Firebrick);
 			_lblDx.Text = "X偏移(px): " + result.DxPx.ToString("F3");
 			_lblDy.Text = "Y偏移(px): " + result.DyPx.ToString("F3");
 			_lblAngle.Text = "角度差(deg): " + result.AngleDeltaDeg.ToString("F4");
 			_lblScore.Text = "综合偏差(px): " + result.ScorePx.ToString("F3") + " / tol " + result.UsedTolerancePx.ToString("F3");
 			_lblFeatureScore.Text = result.FeatureMatchOk ? "模板分数: " + result.FeatureMatchScore.ToString("F3") : "模板分数: NG";
 			_lblElapsed.Text = "耗时(ms): " + result.ElapsedMs.ToString("F1");
+		}
+
+		private static string BuildResultStatusText(PcbPoseInspectResult result)
+		{
+			if (result == null)
+			{
+				return "未加载图像";
+			}
+			if (result.Success)
+			{
+				return "OK";
+			}
+			if (!string.IsNullOrEmpty(result.Message))
+			{
+				return "NG - " + result.Message;
+			}
+			return "NG - " + result.NgReasonText;
 		}
 
 		private void UpdateSegmentationFeedback(BoardSegmentationResult result)
