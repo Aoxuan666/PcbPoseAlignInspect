@@ -663,7 +663,8 @@ namespace PcbPoseAlignInspect.Processing
 			{
 				double num = (double)roi.Top + (double)roi.Height / 2.0;
 				double num2 = (double)roi.Left + (double)roi.Width / 2.0;
-				HOperatorSet.GenEllipse(out region, num, num2, 0.0, Math.Max(1.0, (double)roi.Height / 2.0), Math.Max(1.0, (double)roi.Width / 2.0));
+				double radius = Math.Max(1.0, Math.Min((double)roi.Width, (double)roi.Height) / 2.0);
+				HOperatorSet.GenCircle(out region, num, num2, radius);
 			}
 			else
 			{

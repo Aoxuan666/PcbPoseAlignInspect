@@ -420,10 +420,6 @@ namespace PcbPoseAlignInspect.Controls
 		{
 			if (result != null)
 			{
-				if (!result.RuntimeBoardBoundingBox.IsEmpty)
-				{
-					DrawRoi(g, result.RuntimeBoardBoundingBox, enabled: true, Color.FromArgb(255, 60, 255, 80), "检测板框", handles: false);
-				}
 				DrawPoint(g, result.RuntimeBoardCenter, Color.FromArgb(255, 255, 80, 80), "C");
 				if (!result.RuntimeFeatureBounds.IsEmpty)
 				{
@@ -431,7 +427,7 @@ namespace PcbPoseAlignInspect.Controls
 					{
 						DrawFeatureContour(g, result.RuntimeFeatureContour, result.FeatureMatchOk ? Color.FromArgb(255, 255, 60, 230) : Color.FromArgb(255, 255, 120, 60), result.FeatureMatchOk ? "特征轮廓" : "低分候选");
 					}
-					else
+					else if (!result.FeatureMatchOk)
 					{
 						DrawFeatureRoi(g, result.RuntimeFeatureBounds, enabled: true, result.FeatureMatchOk ? Color.FromArgb(255, 255, 60, 230) : Color.FromArgb(255, 255, 120, 60), result.FeatureMatchOk ? "特征匹配范围" : "低分候选", handles: false);
 					}
@@ -490,7 +486,8 @@ namespace PcbPoseAlignInspect.Controls
 			{
 				if (FeatureRoiShape == FeatureRoiShape.Circle)
 				{
-					g.DrawEllipse(pen, rectangleF);
+					RectangleF circleRect = GetInnerCircleRect(rectangleF);
+					g.DrawEllipse(pen, circleRect);
 				}
 				else
 				{
@@ -507,6 +504,12 @@ namespace PcbPoseAlignInspect.Controls
 				DrawPoint(g, center, color, "T");
 			}
 			DrawLabel(g, text, rectangleF, color);
+		}
+
+		private static RectangleF GetInnerCircleRect(RectangleF rect)
+		{
+			float size = Math.Min(rect.Width, rect.Height);
+			return new RectangleF(rect.Left + (rect.Width - size) / 2f, rect.Top + (rect.Height - size) / 2f, size, size);
 		}
 
 		private void DrawFeatureContour(Graphics g, PointF[] contour, Color color, string text)
