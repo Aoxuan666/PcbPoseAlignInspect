@@ -584,9 +584,9 @@ namespace PcbPoseAlignInspect.Processing
 				double scaleMin = GetFeatureScaleMin(recipe);
 				double scaleMax = GetFeatureScaleMax(recipe);
 				double passScore = Math.Max(0.01, Math.Min(1.0, recipe.FeatureMatchMinScore));
-				double searchScore = Math.Min(passScore, 0.2);
+				double searchScore = Math.Min(passScore, 0.1);
 				double greediness = Math.Max(0.0, Math.Min(1.0, recipe.FeatureGreediness));
-				HOperatorSet.FindScaledShapeModel(imageReduced, model.ModelId, 0.0, new HTuple(360).TupleRad(), scaleMin, scaleMax, searchScore, 1, 0.5, "none", 0, greediness, out var row, out var column, out var angle, out var scale, out var score);
+				HOperatorSet.FindScaledShapeModel(imageReduced, model.ModelId, new HTuple(-20).TupleRad(), new HTuple(40).TupleRad(), scaleMin, scaleMax, searchScore, 10, 0.5, "least_squares", 0, greediness, out var row, out var column, out var angle, out var scale, out var score);
 				if (score == null || score.Length <= 0)
 				{
 					return new FeatureMatch
@@ -594,16 +594,22 @@ namespace PcbPoseAlignInspect.Processing
 						Ok = false,
 						Score = 0.0,
 						CandidateFound = false,
-						Message = "未找到特征模板候选。请确认搜索ROI覆盖目标，或把最小分数先调到0.10到0.20观察候选。"
+						Message = "未找到特征模板候选。搜索ROI=" + rectangle + "，缩放=" + scaleMin.ToString("F2") + "~" + scaleMax.ToString("F2") + "，搜索分数=" + searchScore.ToString("F2") + "。请确认ROI覆盖目标，或重新框选清晰外轮廓保存模板。"
 					};
 				}
 
-				PointF center = new PointF((float)column.D, (float)row.D);
+				int bestIndex = GetBestScoreIndex(score);
+				double bestScore = score[bestIndex].D;
+				double bestRow = row[bestIndex].D;
+				double bestColumn = column[bestIndex].D;
+				double bestAngle = angle[bestIndex].D;
+				double bestScale = scale[bestIndex].D;
+				PointF center = new PointF((float)bestColumn, (float)bestRow);
 				HOperatorSet.GetShapeModelContours(out modelContours, model.ModelId, 1);
 				HOperatorSet.HomMat2dIdentity(out var homMat2DIdentity);
-				HOperatorSet.HomMat2dScale(homMat2DIdentity, scale.D, scale.D, 0.0, 0.0, out var homMat2DScale);
-				HOperatorSet.HomMat2dRotate(homMat2DScale, angle.D, 0.0, 0.0, out var homMat2DRotate);
-				HOperatorSet.HomMat2dTranslate(homMat2DRotate, row.D, column.D, out var homMat2D);
+				HOperatorSet.HomMat2dScale(homMat2DIdentity, bestScale, bestScale, 0.0, 0.0, out var homMat2DScale);
+				HOperatorSet.HomMat2dRotate(homMat2DScale, bestAngle, 0.0, 0.0, out var homMat2DRotate);
+				HOperatorSet.HomMat2dTranslate(homMat2DRotate, bestRow, bestColumn, out var homMat2D);
 				HOperatorSet.AffineTransContourXld(modelContours, out transformedContours, homMat2D);
 				PointF[] contour = XldToContourPoints(transformedContours, 1200);
 				RectangleF bounds = BoundsOf(contour);
@@ -614,14 +620,14 @@ namespace PcbPoseAlignInspect.Processing
 
 				return new FeatureMatch
 				{
-					Ok = score.D >= passScore,
-					Score = score.D,
-					Scale = scale.D,
+					Ok = bestScore >= passScore,
+					Score = bestScore,
+					Scale = bestScale,
 					Center = center,
 					Bounds = bounds,
 					Contour = contour,
 					CandidateFound = true,
-					Message = "找到候选"
+					Message = "找到候选，数量=" + score.Length + "，最佳分数=" + bestScore.ToString("F3") + "，缩放=" + bestScale.ToString("F3")
 				};
 			}
 			catch (Exception ex)
@@ -678,7 +684,7 @@ namespace PcbPoseAlignInspect.Processing
 						CreateFeatureRegion(out region, new RectangleF(0f, 0f, bitmap2.Width, bitmap2.Height), recipe.FeatureRoiShape);
 						HOperatorSet.ReduceDomain(processed, region, out reduced);
 						HOperatorSet.CropDomain(reduced, out cropped);
-						HOperatorSet.CreateScaledShapeModel(cropped, "auto", 0.0, new HTuple(360).TupleRad(), "auto", GetFeatureScaleMin(recipe), GetFeatureScaleMax(recipe), "auto", "auto", "use_polarity", "auto", 2, out modelID);
+						HOperatorSet.CreateScaledShapeModel(cropped, "auto", new HTuple(-20).TupleRad(), new HTuple(40).TupleRad(), "auto", GetFeatureScaleMin(recipe), GetFeatureScaleMax(recipe), "auto", "auto", "ignore_global_polarity", "auto", 2, out modelID);
 						_featureModel = new CachedFeatureModel
 						{
 							Key = key,
@@ -760,6 +766,22 @@ namespace PcbPoseAlignInspect.Processing
 		private static double GetFeatureScaleMax(PcbPoseInspectRecipe recipe)
 		{
 			return Math.Max(GetFeatureScaleMin(recipe), Math.Max(recipe.FeatureScaleMin, recipe.FeatureScaleMax));
+		}
+
+		private static int GetBestScoreIndex(HTuple score)
+		{
+			int bestIndex = 0;
+			double bestScore = double.MinValue;
+			for (int i = 0; i < score.Length; i++)
+			{
+				double currentScore = score[i].D;
+				if (currentScore > bestScore)
+				{
+					bestScore = currentScore;
+					bestIndex = i;
+				}
+			}
+			return bestIndex;
 		}
 
 		private static void CreateFeatureRegion(out HObject region, RectangleF roi, FeatureRoiShape shape)
@@ -879,18 +901,36 @@ namespace PcbPoseAlignInspect.Processing
 				{
 					return new PointF[0];
 				}
-				HOperatorSet.SelectObj(contours, out objectSelected, 1);
-				HOperatorSet.GetContourXld(objectSelected, out var row, out var col);
-				int num = Math.Min(row.Length, col.Length);
-				if (num <= 1)
-				{
-					return new PointF[0];
-				}
-				int num2 = Math.Max(1, num / Math.Max(100, maxPoints));
 				List<PointF> list = new List<PointF>();
-				for (int i = 0; i < num; i += num2)
+				int total = 0;
+				for (int objIndex = 1; objIndex <= number.I; objIndex++)
 				{
-					list.Add(new PointF((float)col[i].D, (float)row[i].D));
+					DisposeObj(objectSelected);
+					objectSelected = null;
+					HOperatorSet.SelectObj(contours, out objectSelected, objIndex);
+					HOperatorSet.GetContourXld(objectSelected, out var row, out var col);
+					total += Math.Min(row.Length, col.Length);
+				}
+				int step = Math.Max(1, total / Math.Max(100, maxPoints));
+				for (int objIndex = 1; objIndex <= number.I; objIndex++)
+				{
+					DisposeObj(objectSelected);
+					objectSelected = null;
+					HOperatorSet.SelectObj(contours, out objectSelected, objIndex);
+					HOperatorSet.GetContourXld(objectSelected, out var row, out var col);
+					int num = Math.Min(row.Length, col.Length);
+					if (num <= 1)
+					{
+						continue;
+					}
+					if (list.Count > 0)
+					{
+						list.Add(new PointF(float.NaN, float.NaN));
+					}
+					for (int i = 0; i < num; i += step)
+					{
+						list.Add(new PointF((float)col[i].D, (float)row[i].D));
+					}
 				}
 				return list.ToArray();
 			}
