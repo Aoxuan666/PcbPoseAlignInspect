@@ -48,6 +48,8 @@ namespace PcbPoseAlignInspect.Controls
 
 		private PointF[] _boardContour = new PointF[0];
 
+		private FeatureTemplatePreview _featurePreview = new FeatureTemplatePreview();
+
 		private float _zoom = 1f;
 
 		private PointF _pan = PointF.Empty;
@@ -141,6 +143,19 @@ namespace PcbPoseAlignInspect.Controls
 			}
 		}
 
+		public FeatureTemplatePreview FeaturePreview
+		{
+			get
+			{
+				return _featurePreview;
+			}
+			set
+			{
+				_featurePreview = value == null ? new FeatureTemplatePreview() : value.Clone();
+				Invalidate();
+			}
+		}
+
 		public event EventHandler RoiChanged;
 
 		public PoseInspectCanvas()
@@ -166,6 +181,7 @@ namespace PcbPoseAlignInspect.Controls
 			EnableBoardSearchRoi = false;
 			EnableFeatureSearchRoi = false;
 			BoardContour = new PointF[0];
+			FeaturePreview = new FeatureTemplatePreview();
 			Result = null;
 			OnRoiChanged();
 		}
@@ -173,6 +189,7 @@ namespace PcbPoseAlignInspect.Controls
 		public void ClearOverlay()
 		{
 			BoardContour = new PointF[0];
+			FeaturePreview = new FeatureTemplatePreview();
 			Result = null;
 			Invalidate();
 		}
@@ -232,6 +249,10 @@ namespace PcbPoseAlignInspect.Controls
 			graphics.PixelOffsetMode = PixelOffsetMode.Half;
 			graphics.DrawImage(_displayImage ?? _image, imageViewRect);
 			DrawContour(graphics);
+			if (!_drawing && !_editing && !_panning)
+			{
+				DrawFeaturePreview(graphics);
+			}
 			DrawRoi(graphics, BoardSearchRoi, EnableBoardSearchRoi, Color.FromArgb(255, 90, 220, 120), "板体检测ROI", handles: true);
 			DrawFeatureRoi(graphics, FeatureSearchRoi, EnableFeatureSearchRoi, Color.FromArgb(255, 210, 80, 255), "特征搜索ROI", handles: true);
 			DrawFeatureRoi(graphics, FeatureTemplateRoi, !FeatureTemplateRoi.IsEmpty, Color.FromArgb(255, 255, 170, 40), "特征模板ROI", handles: true);
@@ -413,6 +434,28 @@ namespace PcbPoseAlignInspect.Controls
 			using (Pen pen = new Pen(Color.FromArgb(245, 30, 255, 100), 2.2f))
 			{
 				g.DrawLines(pen, array);
+			}
+		}
+
+		private void DrawFeaturePreview(Graphics g)
+		{
+			if (_featurePreview == null || _featurePreview.ActivePoints == null || _featurePreview.ActivePoints.Length == 0 || _image == null)
+			{
+				return;
+			}
+			using (Brush brush = new SolidBrush(Color.FromArgb(245, 0, 255, 80)))
+			{
+				using (Pen pen = new Pen(Color.FromArgb(210, 0, 40, 0), 1f))
+				{
+					foreach (PointF point in _featurePreview.ActivePoints)
+					{
+						PointF screen = ImageToScreen(point);
+						float radius = Math.Max(1.2f, Math.Min(2.4f, _zoom * 1.4f));
+						RectangleF rect = new RectangleF(screen.X - radius, screen.Y - radius, radius * 2f, radius * 2f);
+						g.FillEllipse(brush, rect);
+						g.DrawEllipse(pen, rect);
+					}
+				}
 			}
 		}
 

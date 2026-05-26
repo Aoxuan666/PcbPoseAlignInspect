@@ -262,6 +262,60 @@ namespace PcbPoseAlignInspect.Processing
 			}
 		}
 
+		public FeatureTemplatePreview PreviewFeatureTemplate(Bitmap image, PcbPoseInspectRecipe recipe)
+		{
+			var preview = new FeatureTemplatePreview();
+			if (image == null)
+			{
+				preview.Message = "输入图像为空";
+				return preview;
+			}
+			if (recipe == null || recipe.FeatureTemplateRoi.Width < 4f || recipe.FeatureTemplateRoi.Height < 4f)
+			{
+				preview.Message = "请先绘制特征模板ROI";
+				return preview;
+			}
+			using (Bitmap bitmap = To24bpp(image))
+			{
+				HObject hoImage = null;
+				HObject grayImage = null;
+				HObject processed = null;
+				HObject region = null;
+				HObject reduced = null;
+				HObject edges = null;
+				HObject selected = null;
+				try
+				{
+					hoImage = CreateHalconImageFromBitmap(bitmap);
+					HOperatorSet.Rgb1ToGray(hoImage, out grayImage);
+					int mean = Math.Max(1, recipe.FeatureTemplateMeanSize);
+					HOperatorSet.MeanImage(grayImage, out processed, mean, mean);
+					CreateFeatureRegion(out region, ToClippedRectangleF(recipe.FeatureTemplateRoi, bitmap.Width, bitmap.Height), recipe.FeatureRoiShape);
+					HOperatorSet.ReduceDomain(processed, region, out reduced);
+					HOperatorSet.EdgesSubPix(reduced, out edges, "canny", 1.2, 20, 40);
+					HOperatorSet.SelectShapeXld(edges, out selected, "contlength", "and", 12, 999999);
+					preview.ActivePoints = XldToFeaturePoints(selected, region, 1800);
+					preview.Message = preview.ActivePoints.Length == 0 ? "当前ROI内没有提取到有效特征点" : "特征点: " + preview.ActivePoints.Length;
+					return preview;
+				}
+				catch (Exception ex)
+				{
+					preview.Message = "特征点预览失败: " + ex.Message;
+					return preview;
+				}
+				finally
+				{
+					DisposeObj(hoImage);
+					DisposeObj(grayImage);
+					DisposeObj(processed);
+					DisposeObj(region);
+					DisposeObj(reduced);
+					DisposeObj(edges);
+					DisposeObj(selected);
+				}
+			}
+		}
+
 		private static string BuildInspectMessage(bool success, InspectNgReason reason, DetectedPose pose, PcbPoseInspectRecipe recipe)
 		{
 			if (success)
@@ -768,6 +822,19 @@ namespace PcbPoseAlignInspect.Processing
 			return Math.Max(GetFeatureScaleMin(recipe), Math.Max(recipe.FeatureScaleMin, recipe.FeatureScaleMax));
 		}
 
+		private static RectangleF ToClippedRectangleF(RectangleF roi, int width, int height)
+		{
+			if (roi.IsEmpty || width <= 0 || height <= 0)
+			{
+				return RectangleF.Empty;
+			}
+			float left = Math.Max(0f, Math.Min(width - 1f, roi.Left));
+			float top = Math.Max(0f, Math.Min(height - 1f, roi.Top));
+			float right = Math.Max(left + 1f, Math.Min(width, roi.Right));
+			float bottom = Math.Max(top + 1f, Math.Min(height, roi.Bottom));
+			return RectangleF.FromLTRB(left, top, right, bottom);
+		}
+
 		private static int GetBestScoreIndex(HTuple score)
 		{
 			int bestIndex = 0;
@@ -933,6 +1000,65 @@ namespace PcbPoseAlignInspect.Processing
 					}
 				}
 				return list.ToArray();
+			}
+			catch
+			{
+				return new PointF[0];
+			}
+			finally
+			{
+				DisposeObj(objectSelected);
+			}
+		}
+
+		private static PointF[] XldToFeaturePoints(HObject contours, HObject validRegion, int maxPoints)
+		{
+			if (contours == null)
+			{
+				return new PointF[0];
+			}
+			HObject objectSelected = null;
+			var points = new List<PointF>();
+			try
+			{
+				HOperatorSet.CountObj(contours, out var number);
+				if (number.I <= 0)
+				{
+					return new PointF[0];
+				}
+				int total = 0;
+				for (int objIndex = 1; objIndex <= number.I; objIndex++)
+				{
+					DisposeObj(objectSelected);
+					objectSelected = null;
+					HOperatorSet.SelectObj(contours, out objectSelected, objIndex);
+					HOperatorSet.GetContourXld(objectSelected, out var row, out var col);
+					total += Math.Min(row.Length, col.Length);
+				}
+				int step = Math.Max(1, total / Math.Max(1, maxPoints));
+				for (int objIndex = 1; objIndex <= number.I; objIndex++)
+				{
+					DisposeObj(objectSelected);
+					objectSelected = null;
+					HOperatorSet.SelectObj(contours, out objectSelected, objIndex);
+					HOperatorSet.GetContourXld(objectSelected, out var row, out var col);
+					int count = Math.Min(row.Length, col.Length);
+					for (int i = 0; i < count; i += step)
+					{
+						double r = row[i].D;
+						double c = col[i].D;
+						if (validRegion != null)
+						{
+							HOperatorSet.TestRegionPoint(validRegion, r, c, out var inside);
+							if (inside.I == 0)
+							{
+								continue;
+							}
+						}
+						points.Add(new PointF((float)c, (float)r));
+					}
+				}
+				return points.ToArray();
 			}
 			catch
 			{

@@ -19,6 +19,7 @@ namespace PcbPoseAlignInspect.Forms
 		private readonly SplitContainer _splitContainer;
 		private readonly PoseInspectCanvas _canvas;
 		private readonly Timer _previewTimer;
+		private readonly Timer _featurePreviewTimer;
 		private readonly ToolTip _toolTip;
 
 		private Bitmap _startupImage;
@@ -28,8 +29,11 @@ namespace PcbPoseAlignInspect.Forms
 		private bool _binding;
 		private bool _contourRunning;
 		private bool _contourRefreshPending;
+		private bool _featurePreviewRunning;
+		private bool _featurePreviewPending;
 		private bool _inspectionRunning;
 		private int _workVersion;
+		private int _featurePreviewVersion;
 
 		private TextBox _txtImagePath;
 		private Button _btnUseStartupImage;
@@ -115,6 +119,9 @@ namespace PcbPoseAlignInspect.Forms
 			_previewTimer = new Timer();
 			_previewTimer.Interval = 260;
 			_previewTimer.Tick += PreviewTimerOnTick;
+			_featurePreviewTimer = new Timer();
+			_featurePreviewTimer.Interval = 220;
+			_featurePreviewTimer.Tick += FeaturePreviewTimerOnTick;
 
 			BindRecipeToUi();
 			SetStatus("未加载图像", Color.DimGray);
@@ -124,6 +131,8 @@ namespace PcbPoseAlignInspect.Forms
 		{
 			_previewTimer.Stop();
 			_previewTimer.Dispose();
+			_featurePreviewTimer.Stop();
+			_featurePreviewTimer.Dispose();
 			_toolTip.Dispose();
 			_processor.Dispose();
 			DisposeBitmap(ref _startupImage);
@@ -351,6 +360,7 @@ namespace PcbPoseAlignInspect.Forms
 				_canvas.FeatureRoiShape = CurrentRecipe.FeatureRoiShape;
 				_canvas.ClearOverlay();
 				_canvas.Invalidate();
+				ScheduleFeaturePreviewRefresh();
 			}
 			finally
 			{
@@ -403,6 +413,7 @@ namespace PcbPoseAlignInspect.Forms
 			CurrentRecipe.EnableBoardSearchRoi = _canvas.EnableBoardSearchRoi;
 			CurrentRecipe.FeatureSearchRoi = _canvas.FeatureSearchRoi;
 			CurrentRecipe.FeatureTemplateRoi = _canvas.FeatureTemplateRoi;
+			ScheduleFeaturePreviewRefresh();
 			_binding = true;
 			_chkBoardRoi.Checked = _canvas.EnableBoardSearchRoi;
 			_binding = false;
@@ -604,6 +615,7 @@ namespace PcbPoseAlignInspect.Forms
 				_canvas.FeatureTemplateRoi = CurrentRecipe.FeatureTemplateRoi;
 				_canvas.FeatureRoiShape = CurrentRecipe.FeatureRoiShape;
 				_canvas.Result = null;
+				ScheduleFeaturePreviewRefresh();
 				UpdateResult(result);
 				SetStatus("特征模板已保存", Color.SeaGreen);
 				MessageBox.Show(this, "特征模板已保存，并记录了特征中心到板中心的偏移关系。换图后可以直接点击“运行检测”测试匹配效果。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -752,6 +764,7 @@ namespace PcbPoseAlignInspect.Forms
 
 			SetStatus("图像已加载，正在预览轮廓", Color.DimGray);
 			ScheduleContourRefresh();
+			ScheduleFeaturePreviewRefresh();
 		}
 
 		private void RequireImageThenSetMode(PoseInspectCanvas.CanvasTeachMode mode)
@@ -787,6 +800,7 @@ namespace PcbPoseAlignInspect.Forms
 				ApplyUiToRecipe();
 				_canvas.Result = null;
 				_canvas.Invalidate();
+				ScheduleFeaturePreviewRefresh();
 				if (_currentImage != null)
 				{
 					SetStatus("特征参数已修改", Color.DimGray);
@@ -851,6 +865,77 @@ namespace PcbPoseAlignInspect.Forms
 			}
 			_previewTimer.Stop();
 			_previewTimer.Start();
+		}
+
+		private void FeaturePreviewTimerOnTick(object sender, EventArgs e)
+		{
+			_featurePreviewTimer.Stop();
+			RunFeaturePreviewAsync();
+		}
+
+		private void ScheduleFeaturePreviewRefresh()
+		{
+			if (_binding || _currentImage == null)
+			{
+				return;
+			}
+			_featurePreviewTimer.Stop();
+			_featurePreviewTimer.Start();
+		}
+
+		private void RunFeaturePreviewAsync()
+		{
+			if (_currentImage == null)
+			{
+				_canvas.FeaturePreview = new FeatureTemplatePreview();
+				return;
+			}
+			if (_featurePreviewRunning)
+			{
+				_featurePreviewPending = true;
+				return;
+			}
+
+			ApplyUiToRecipe();
+			PcbPoseInspectRecipe previewRecipe = CurrentRecipe.Clone();
+			if (previewRecipe.FeatureTemplateRoi.Width < 4f || previewRecipe.FeatureTemplateRoi.Height < 4f)
+			{
+				_canvas.FeaturePreview = new FeatureTemplatePreview();
+				return;
+			}
+
+			Bitmap imageCopy = new Bitmap(_currentImage);
+			int version = ++_featurePreviewVersion;
+			_featurePreviewRunning = true;
+			_featurePreviewPending = false;
+			Task.Run(delegate
+			{
+				try
+				{
+					return _processor.PreviewFeatureTemplate(imageCopy, previewRecipe);
+				}
+				finally
+				{
+					imageCopy.Dispose();
+				}
+			}).ContinueWith(delegate(Task<FeatureTemplatePreview> task)
+			{
+				_featurePreviewRunning = false;
+				if (!IsDisposed && !Disposing && version == _featurePreviewVersion)
+				{
+					FeatureTemplatePreview preview = task.Status == TaskStatus.RanToCompletion && task.Result != null ? task.Result : new FeatureTemplatePreview { Message = "特征点预览异常" };
+					_canvas.FeaturePreview = preview;
+					if (_currentImage != null && !_inspectionRunning && !_contourRunning && preview.ActivePoints != null && preview.ActivePoints.Length > 0)
+					{
+						SetStatus("特征点预览: " + preview.ActivePoints.Length, Color.DimGray);
+					}
+				}
+				if (_featurePreviewPending && !IsDisposed && !Disposing)
+				{
+					_featurePreviewPending = false;
+					BeginInvoke(new Action(RunFeaturePreviewAsync));
+				}
+			}, TaskScheduler.FromCurrentSynchronizationContext());
 		}
 
 		private void MarkContourDirty(string text)
