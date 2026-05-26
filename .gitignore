@@ -1,0 +1,30 @@
+# Visual Studio user state
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build results
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+
+# NuGet
+packages/
+*.nupkg
+project.assets.json
+project.nuget.cache
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+~$*
+
+# OS metadata
+Thumbs.db
+Desktop.ini
