@@ -19,6 +19,8 @@ WinForms + HALCON 的 PCB 治具入穴姿态检测配置项目。
 
 ## 构建
 
+项目依赖 Windows、.NET Framework WinForms、HALCON .NET 运行库，建议使用 Visual Studio 2022 或 MSBuild 按 x64 平台构建：
+
 ```powershell
-dotnet build
+& 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe' .\PcbPoseAlignInspect.sln /p:Configuration=Debug /p:Platform=x64 /m
 ```

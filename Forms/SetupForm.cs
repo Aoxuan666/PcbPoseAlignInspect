@@ -19,6 +19,7 @@ namespace PcbPoseAlignInspect.Forms
 		private readonly SplitContainer _splitContainer;
 		private readonly PoseInspectCanvas _canvas;
 		private readonly Timer _previewTimer;
+		private readonly ToolTip _toolTip;
 
 		private Bitmap _startupImage;
 		private Bitmap _currentImage;
@@ -63,6 +64,13 @@ namespace PcbPoseAlignInspect.Forms
 		private Label _lblScore;
 		private Label _lblFeatureScore;
 		private Label _lblElapsed;
+		private Label _lblSegStatus;
+		private Label _lblSegCandidates;
+		private Label _lblSegArea;
+		private Label _lblSegCenter;
+		private Label _lblSegAngle;
+		private Label _lblSegContour;
+		private Label _lblSegElapsed;
 
 		public PcbPoseInspectRecipe CurrentRecipe { get; private set; }
 
@@ -92,6 +100,10 @@ namespace PcbPoseAlignInspect.Forms
 			rightPanel.AutoScroll = false;
 			rightPanel.Padding = new Padding(10);
 			_splitContainer.Panel2.Controls.Add(rightPanel);
+			_toolTip = new ToolTip();
+			_toolTip.AutoPopDelay = 12000;
+			_toolTip.InitialDelay = 300;
+			_toolTip.ReshowDelay = 100;
 			BuildRightPanel(rightPanel);
 			Shown += delegate { BeginInvoke(new Action(ApplyInitialSplitterDistance)); };
 
@@ -107,6 +119,7 @@ namespace PcbPoseAlignInspect.Forms
 		{
 			_previewTimer.Stop();
 			_previewTimer.Dispose();
+			_toolTip.Dispose();
 			DisposeBitmap(ref _startupImage);
 			DisposeBitmap(ref _currentImage);
 			DisposeBitmap(ref _previewImage);
@@ -139,6 +152,18 @@ namespace PcbPoseAlignInspect.Forms
 
 		private void BuildRightPanel(Control parent)
 		{
+			Panel bottomPanel = new Panel();
+			bottomPanel.Dock = DockStyle.Bottom;
+			bottomPanel.Height = 48;
+			parent.Controls.Add(bottomPanel);
+
+			AddButton(bottomPanel, "确认配置", 4, 8, 198, 34, BtnOkOnClick);
+			AddButton(bottomPanel, "取消", 216, 8, 198, 34, delegate
+			{
+				DialogResult = DialogResult.Cancel;
+				Close();
+			});
+
 			TabControl tabs = new TabControl();
 			tabs.Dock = DockStyle.Fill;
 			parent.Controls.Add(tabs);
@@ -158,6 +183,7 @@ namespace PcbPoseAlignInspect.Forms
 			{
 				_canvas.ClearRois();
 				UpdateResult(null);
+				UpdateSegmentationFeedback(null);
 				SetStatus("已清空", Color.DimGray);
 			});
 			AddButton(imageGroup, "画板体ROI", 146, 68, 122, 30, delegate
@@ -171,22 +197,41 @@ namespace PcbPoseAlignInspect.Forms
 			imageGroup.Controls.Add(_txtImagePath);
 
 			y += 158;
-			GroupBox boardGroup = AddGroup(boardPage, "2. PCB板体分割", y, 390);
-			AddRangeRow(boardGroup, "H 范围", 28, out _numHueMin, out _numHueMax);
-			AddRangeRow(boardGroup, "S 范围", 62, out _numSatMin, out _numSatMax);
-			AddRangeRow(boardGroup, "V 范围", 96, out _numValMin, out _numValMax);
-			_numGreenRedDiff = AddSingleNumericRow(boardGroup, "G-R 最小差", 130, 0m, 255m, 0);
-			_numGreenBlueDiff = AddSingleNumericRow(boardGroup, "G-B 最小差", 164, 0m, 255m, 0);
-			_numRedMax = AddSingleNumericRow(boardGroup, "R 最大值", 198, 0m, 255m, 0);
-			_numOpenRadius = AddDoubleNumericRow(boardGroup, "开运算", "闭运算", 232, 0m, 120m, 1, out _numCloseRadius);
-			_numBoardMinArea = AddSingleNumericRow(boardGroup, "最小面积", 266, 1m, 20000000m, 0);
-			_chkFillUp = AddCheckBox(boardGroup, "填洞 FillUp", 12, 302, 120);
-			_chkUseConvexHull = AddCheckBox(boardGroup, "凸包补边", 142, 302, 100);
-			_chkBoardRoi = AddCheckBox(boardGroup, "启用板体ROI", 250, 302, 120);
-			_chkAutoPreview = AddCheckBox(boardGroup, "自动预览", 12, 332, 100);
+			GroupBox boardGroup = AddGroup(boardPage, "2. PCB颜色识别", y, 320);
+			AddRangeRow(boardGroup, "绿色色相", 28, out _numHueMin, out _numHueMax);
+			AddRangeRow(boardGroup, "颜色纯度", 62, out _numSatMin, out _numSatMax);
+			AddRangeRow(boardGroup, "亮度范围", 96, out _numValMin, out _numValMax);
+			_numGreenRedDiff = AddSingleNumericRow(boardGroup, "绿强于红", 130, 0m, 255m, 0);
+			_numGreenBlueDiff = AddSingleNumericRow(boardGroup, "绿强于蓝", 164, 0m, 255m, 0);
+			_numRedMax = AddSingleNumericRow(boardGroup, "红色上限", 198, 0m, 255m, 0);
+			_numOpenRadius = AddDoubleNumericRow(boardGroup, "去小噪点", "补断边", 232, 0m, 120m, 1, out _numCloseRadius);
+			_numBoardMinArea = AddSingleNumericRow(boardGroup, "最小板面积", 266, 1m, 20000000m, 0);
+			_chkFillUp = AddCheckBox(boardGroup, "填充孔洞", 12, 302, 100);
+			_chkUseConvexHull = AddCheckBox(boardGroup, "补齐外轮廓", 112, 302, 120);
+			_chkBoardRoi = AddCheckBox(boardGroup, "启用板体ROI", 236, 302, 120);
+
+			y += 328;
+			GroupBox previewGroup = AddGroup(boardPage, "3. 分割反馈", y, 148);
+			_chkAutoPreview = AddCheckBox(previewGroup, "自动预览", 12, 28, 100);
 			_chkAutoPreview.Checked = true;
-			AddButton(boardGroup, "推荐PCB参数", 142, 328, 126, 30, BtnApplyPcbPresetOnClick);
-			_btnTeachBoard = AddButton(boardGroup, "保存板体示教", 280, 328, 122, 30, BtnTeachBoardOnClick);
+			AddButton(previewGroup, "推荐PCB参数", 118, 24, 126, 30, BtnApplyPcbPresetOnClick);
+			_btnTeachBoard = AddButton(previewGroup, "保存板体示教", 256, 24, 122, 30, BtnTeachBoardOnClick);
+			_lblSegStatus = AddResultLabel(previewGroup, "分割", 12, 62, "未加载图像");
+			_lblSegStatus.Width = 366;
+			_lblSegCandidates = AddResultLabel(previewGroup, "候选", 12, 90, "-");
+			_lblSegCandidates.Width = 126;
+			_lblSegArea = AddResultLabel(previewGroup, "面积", 12, 118, "-");
+			_lblSegArea.Width = 126;
+			_lblSegCenter = AddResultLabel(previewGroup, "中心", 144, 90, "-");
+			_lblSegCenter.Width = 132;
+			_lblSegAngle = AddResultLabel(previewGroup, "角度", 144, 118, "-");
+			_lblSegAngle.Width = 132;
+			_lblSegContour = AddResultLabel(previewGroup, "轮廓点", 282, 90, "-");
+			_lblSegContour.Width = 116;
+			_lblSegElapsed = AddResultLabel(previewGroup, "耗时", 282, 118, "-");
+			_lblSegElapsed.Width = 116;
+			InitBoardParameterTips();
+			UpdateSegmentationFeedback(null);
 
 			y = 8;
 			GroupBox featureGroup = AddGroup(resultPage, "3. 特征模板定位", y, 210);
@@ -215,19 +260,12 @@ namespace PcbPoseAlignInspect.Forms
 			_numTolerance = AddNumeric(resultGroup, 132, 26, 136, 0m, 9999m, 2);
 			_btnRun = AddButton(resultGroup, "运行检测", 280, 25, 122, 30, BtnRunOnClick);
 			_lblStatus = AddResultLabel(resultGroup, "状态", 12, 68, "未加载图像");
-			_lblDx = AddResultLabel(resultGroup, "dx(px)", 12, 96, "-");
-			_lblDy = AddResultLabel(resultGroup, "dy(px)", 12, 124, "-");
-			_lblAngle = AddResultLabel(resultGroup, "dAngle(deg)", 12, 152, "-");
-			_lblScore = AddResultLabel(resultGroup, "score(px)", 12, 180, "-");
-			_lblFeatureScore = AddResultLabel(resultGroup, "feature", 214, 96, "-");
+			_lblDx = AddResultLabel(resultGroup, "X偏移(px)", 12, 96, "-");
+			_lblDy = AddResultLabel(resultGroup, "Y偏移(px)", 12, 124, "-");
+			_lblAngle = AddResultLabel(resultGroup, "角度差(deg)", 12, 152, "-");
+			_lblScore = AddResultLabel(resultGroup, "综合偏差(px)", 12, 180, "-");
+			_lblFeatureScore = AddResultLabel(resultGroup, "模板分数", 214, 96, "-");
 			_lblElapsed = AddResultLabel(resultGroup, "耗时(ms)", 214, 124, "-");
-			y += 228;
-			AddButton(resultPage, "确认配置", 10, y, 194, 36, BtnOkOnClick);
-			AddButton(resultPage, "取消", 218, y, 194, 36, delegate
-			{
-				DialogResult = DialogResult.Cancel;
-				Close();
-			});
 
 			HookParameterChanged();
 		}
@@ -616,36 +654,45 @@ namespace PcbPoseAlignInspect.Forms
 			int version = ++_workVersion;
 			_contourRunning = true;
 			_contourRefreshPending = false;
-			_btnExtractContour.Enabled = false;
+			if (_btnExtractContour != null)
+			{
+				_btnExtractContour.Enabled = false;
+			}
 			SetStatus("轮廓提取中...", Color.DimGray);
+			SetSegmentationStatus("分割中...", Color.DimGray);
 			Task.Run(delegate
 			{
 				try
 				{
-					PointF[] contour = _processor.ExtractBoardContour(previewImage, previewRecipe);
-					return ScaleContourToSource(contour, scale);
+					BoardSegmentationResult result = _processor.ExtractBoardSegmentation(previewImage, previewRecipe);
+					return ScaleSegmentationToSource(result, scale);
 				}
 				finally
 				{
 					previewImage.Dispose();
 				}
-			}).ContinueWith(delegate(Task<PointF[]> task)
+			}).ContinueWith(delegate(Task<BoardSegmentationResult> task)
 			{
 				_contourRunning = false;
-				_btnExtractContour.Enabled = !_inspectionRunning;
+				if (_btnExtractContour != null)
+				{
+					_btnExtractContour.Enabled = !_inspectionRunning;
+				}
 				if (!IsDisposed && !Disposing && version == _workVersion)
 				{
 					if (task.Status != TaskStatus.RanToCompletion)
 					{
 						_canvas.BoardContour = new PointF[0];
+						UpdateSegmentationFeedback(BoardSegmentationResult.Invalid("轮廓提取异常"));
 						SetStatus("轮廓提取异常", Color.Firebrick);
 						MessageBox.Show(this, "轮廓提取异常: " + GetTaskError(task), "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
 					}
 					else
 					{
-						PointF[] contour = task.Result ?? new PointF[0];
-						_canvas.BoardContour = contour;
-						SetStatus(contour.Length > 1 ? "轮廓已提取" : "未提取到有效轮廓", contour.Length > 1 ? Color.SeaGreen : Color.Firebrick);
+						BoardSegmentationResult result = task.Result ?? BoardSegmentationResult.Invalid("未提取到有效轮廓");
+						_canvas.BoardContour = result.Contour ?? new PointF[0];
+						UpdateSegmentationFeedback(result);
+						SetStatus(result.Success ? "轮廓已提取" : "未提取到有效轮廓", result.Success ? Color.SeaGreen : Color.Firebrick);
 					}
 				}
 				if (_contourRefreshPending && !IsDisposed && !Disposing)
@@ -666,10 +713,13 @@ namespace PcbPoseAlignInspect.Forms
 			{
 				_canvas.ClearOverlay();
 				UpdateResult(null);
+				UpdateSegmentationFeedback(null);
+				SetStatus("已清空", Color.DimGray);
 			}
 			_txtImagePath.Text = pathText ?? string.Empty;
 			if (_currentImage == null)
 			{
+				UpdateSegmentationFeedback(null);
 				SetStatus("未加载图像", Color.DimGray);
 				return;
 			}
@@ -784,6 +834,7 @@ namespace PcbPoseAlignInspect.Forms
 			if (!_chkAutoPreview.Checked)
 			{
 				_canvas.BoardContour = new PointF[0];
+				UpdateSegmentationFeedback(null);
 			}
 			if (_currentImage != null)
 			{
@@ -796,22 +847,45 @@ namespace PcbPoseAlignInspect.Forms
 		{
 			if (result == null)
 			{
-				_lblDx.Text = "dx(px): -";
-				_lblDy.Text = "dy(px): -";
-				_lblAngle.Text = "dAngle(deg): -";
-				_lblScore.Text = "score(px): -";
-				_lblFeatureScore.Text = "feature: -";
+				_lblDx.Text = "X偏移(px): -";
+				_lblDy.Text = "Y偏移(px): -";
+				_lblAngle.Text = "角度差(deg): -";
+				_lblScore.Text = "综合偏差(px): -";
+				_lblFeatureScore.Text = "模板分数: -";
 				_lblElapsed.Text = "耗时(ms): -";
 				return;
 			}
 
 			SetStatus(result.Success ? "OK" : "NG - " + result.NgReasonText, result.Success ? Color.SeaGreen : Color.Firebrick);
-			_lblDx.Text = "dx(px): " + result.DxPx.ToString("F3");
-			_lblDy.Text = "dy(px): " + result.DyPx.ToString("F3");
-			_lblAngle.Text = "dAngle(deg): " + result.AngleDeltaDeg.ToString("F4");
-			_lblScore.Text = "score(px): " + result.ScorePx.ToString("F3") + " / tol " + result.UsedTolerancePx.ToString("F3");
-			_lblFeatureScore.Text = result.FeatureMatchOk ? "feature: " + result.FeatureMatchScore.ToString("F3") : "feature: NG";
+			_lblDx.Text = "X偏移(px): " + result.DxPx.ToString("F3");
+			_lblDy.Text = "Y偏移(px): " + result.DyPx.ToString("F3");
+			_lblAngle.Text = "角度差(deg): " + result.AngleDeltaDeg.ToString("F4");
+			_lblScore.Text = "综合偏差(px): " + result.ScorePx.ToString("F3") + " / tol " + result.UsedTolerancePx.ToString("F3");
+			_lblFeatureScore.Text = result.FeatureMatchOk ? "模板分数: " + result.FeatureMatchScore.ToString("F3") : "模板分数: NG";
 			_lblElapsed.Text = "耗时(ms): " + result.ElapsedMs.ToString("F1");
+		}
+
+		private void UpdateSegmentationFeedback(BoardSegmentationResult result)
+		{
+			if (result == null)
+			{
+				SetSegmentationStatus("未加载图像", Color.DimGray);
+				_lblSegCandidates.Text = "候选: -";
+				_lblSegArea.Text = "面积: -";
+				_lblSegCenter.Text = "中心: -";
+				_lblSegAngle.Text = "角度: -";
+				_lblSegContour.Text = "轮廓点: -";
+				_lblSegElapsed.Text = "耗时: -";
+				return;
+			}
+
+			SetSegmentationStatus(result.Success ? result.Message : (string.IsNullOrEmpty(result.Message) ? "未提取到有效轮廓" : result.Message), result.Success ? Color.SeaGreen : Color.Firebrick);
+			_lblSegCandidates.Text = "候选: " + result.CandidateCount.ToString();
+			_lblSegArea.Text = "面积: " + result.SelectedArea.ToString("F0");
+			_lblSegCenter.Text = result.Success ? "中心: " + result.Center.X.ToString("F1") + ", " + result.Center.Y.ToString("F1") : "中心: -";
+			_lblSegAngle.Text = result.Success ? "角度: " + result.AngleDeg.ToString("F2") : "角度: -";
+			_lblSegContour.Text = "轮廓点: " + result.ContourPointCount.ToString();
+			_lblSegElapsed.Text = "耗时: " + result.ElapsedMs.ToString("F1");
 		}
 
 		private void SetStatus(string text, Color backColor)
@@ -825,16 +899,67 @@ namespace PcbPoseAlignInspect.Forms
 			_lblStatus.ForeColor = Color.White;
 		}
 
+		private void SetSegmentationStatus(string text, Color backColor)
+		{
+			if (_lblSegStatus == null)
+			{
+				return;
+			}
+			_lblSegStatus.Text = "分割: " + text;
+			_lblSegStatus.BackColor = backColor;
+			_lblSegStatus.ForeColor = Color.White;
+		}
+
 		private void SetBusy(bool busy, string status)
 		{
 			_inspectionRunning = busy;
-			_btnRun.Enabled = !busy;
-			_btnTeachBoard.Enabled = !busy;
-			_btnSaveFeatureTemplate.Enabled = !busy;
-			_btnExtractContour.Enabled = !busy && !_contourRunning;
+			if (_btnRun != null)
+			{
+				_btnRun.Enabled = !busy;
+			}
+			if (_btnTeachBoard != null)
+			{
+				_btnTeachBoard.Enabled = !busy;
+			}
+			if (_btnSaveFeatureTemplate != null)
+			{
+				_btnSaveFeatureTemplate.Enabled = !busy;
+			}
+			if (_btnExtractContour != null)
+			{
+				_btnExtractContour.Enabled = !busy && !_contourRunning;
+			}
 			if (!string.IsNullOrEmpty(status))
 			{
 				SetStatus(status, Color.DimGray);
+			}
+		}
+
+		private void InitBoardParameterTips()
+		{
+			SetTip(_numHueMin, "控制识别的颜色种类。绿色 PCB 一般在当前默认范围附近微调。");
+			SetTip(_numHueMax, "控制识别的颜色种类。范围太宽会把背景或反光也选进来。");
+			SetTip(_numSatMin, "颜色纯度下限。调低会接受发灰、偏白的区域，调高只接受更鲜艳的绿色。");
+			SetTip(_numSatMax, "颜色纯度上限。通常保持较高，除非高饱和杂色被误识别。");
+			SetTip(_numValMin, "亮度下限。调低能保留暗处 PCB，调高会过滤暗背景。");
+			SetTip(_numValMax, "亮度上限。调低可以排除过亮反光，太低会丢失板体。");
+			SetTip(_numGreenRedDiff, "要求绿色通道比红色通道强多少。数值越大，越能排除偏黄或偏红反光。");
+			SetTip(_numGreenBlueDiff, "要求绿色通道比蓝色通道强多少。数值越大，越能排除偏蓝背景。");
+			SetTip(_numRedMax, "红色通道最高允许值。降低可排除铜色、黄色、红色反光。");
+			SetTip(_numOpenRadius, "去掉小噪点。数值越大，越容易清掉零散误识别，也可能切掉细小板边。");
+			SetTip(_numCloseRadius, "补齐断开的边缘。数值越大，越容易连成完整板体，也可能把相邻区域粘上。");
+			SetTip(_numBoardMinArea, "小于该面积的区域会被忽略。调太大会找不到小板，调太小会接受噪声。");
+			SetTip(_chkFillUp, "把板体内部的小孔洞填起来，让面积和中心更稳定。");
+			SetTip(_chkUseConvexHull, "用外轮廓补齐凹进去的边缘，适合板边被孔洞或反光切碎时使用。");
+			SetTip(_chkBoardRoi, "只在画出的板体 ROI 内找 PCB，能明显减少背景误识别。");
+			SetTip(_chkAutoPreview, "参数变化后自动刷新绿色轮廓和分割反馈。");
+		}
+
+		private void SetTip(Control control, string text)
+		{
+			if (control != null)
+			{
+				_toolTip.SetToolTip(control, text);
 			}
 		}
 
@@ -904,6 +1029,25 @@ namespace PcbPoseAlignInspect.Forms
 				scaled[i] = new PointF(contour[i].X * factor, contour[i].Y * factor);
 			}
 			return scaled;
+		}
+
+		private static BoardSegmentationResult ScaleSegmentationToSource(BoardSegmentationResult result, float scale)
+		{
+			if (result == null)
+			{
+				return BoardSegmentationResult.Invalid("未提取到有效轮廓");
+			}
+			if (Math.Abs(scale - 1f) < 0.001f)
+			{
+				return result;
+			}
+
+			float factor = 1f / scale;
+			result.Contour = ScaleContourToSource(result.Contour, scale);
+			result.Center = new PointF(result.Center.X * factor, result.Center.Y * factor);
+			result.BoundingBox = new RectangleF(result.BoundingBox.X * factor, result.BoundingBox.Y * factor, result.BoundingBox.Width * factor, result.BoundingBox.Height * factor);
+			result.SelectedArea = result.SelectedArea * factor * factor;
+			return result;
 		}
 
 		private static Bitmap CropBitmap(Bitmap source, RectangleF roiF)

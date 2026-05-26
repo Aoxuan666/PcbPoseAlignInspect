@@ -75,6 +75,7 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Models\FeatureRoiShape.cs" />
+    <Compile Include="Models\BoardSegmentationResult.cs" />
     <Compile Include="Models\InspectNgReason.cs" />
     <Compile Include="Models\PcbPoseInspectRecipe.cs" />
     <Compile Include="Models\PcbPoseInspectResult.cs" />

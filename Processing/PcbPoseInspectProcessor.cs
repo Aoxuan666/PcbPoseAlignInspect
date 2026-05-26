@@ -172,10 +172,16 @@ namespace PcbPoseAlignInspect.Processing
 
 		public PointF[] ExtractBoardContour(Bitmap image, PcbPoseInspectRecipe recipe)
 		{
+			return ExtractBoardSegmentation(image, recipe).Contour;
+		}
+
+		public BoardSegmentationResult ExtractBoardSegmentation(Bitmap image, PcbPoseInspectRecipe recipe)
+		{
 			if (image == null || recipe == null)
 			{
-				return new PointF[0];
+				return BoardSegmentationResult.Invalid(image == null ? "输入图像为空" : "配方为空");
 			}
+			Stopwatch stopwatch = Stopwatch.StartNew();
 			using (Bitmap bitmap = To24bpp(image))
 			{
 				HObject hObject = null;
@@ -183,15 +189,38 @@ namespace PcbPoseAlignInspect.Processing
 				try
 				{
 					hObject = CreateHalconImageFromBitmap(bitmap);
-					if (!TrySegmentBoardRegion(hObject, bitmap.Width, bitmap.Height, recipe, out selectedRegion, out var _, out var _, out var _))
+					if (!TrySegmentBoardRegion(hObject, bitmap.Width, bitmap.Height, recipe, out selectedRegion, out var error, out var selectedArea, out var candidateCount))
 					{
-						return new PointF[0];
+						return new BoardSegmentationResult
+						{
+							Success = false,
+							Message = error,
+							CandidateCount = candidateCount,
+							SelectedArea = selectedArea,
+							ElapsedMs = stopwatch.Elapsed.TotalMilliseconds
+						};
 					}
-					return RegionToContourPoints(selectedRegion, 1800);
+					PointF[] contour = RegionToContourPoints(selectedRegion, 1800);
+					HOperatorSet.AreaCenter(selectedRegion, out var area, out var row, out var column);
+					HOperatorSet.SmallestRectangle2(selectedRegion, out var _, out var _, out var phi, out var _, out var _);
+					HOperatorSet.SmallestRectangle1(selectedRegion, out var row1, out var column1, out var row2, out var column2);
+					double finalArea = area.D > 0.0 ? area.D : selectedArea;
+					return new BoardSegmentationResult
+					{
+						Success = contour.Length > 1,
+						Message = contour.Length > 1 ? "轮廓已提取" : "未提取到有效轮廓",
+						Contour = contour,
+						CandidateCount = candidateCount,
+						SelectedArea = finalArea,
+						Center = new PointF((float)column.D, (float)row.D),
+						AngleDeg = NormalizeAngleDeg(phi.D * 180.0 / Math.PI),
+						BoundingBox = RectangleF.FromLTRB((float)column1.D, (float)row1.D, (float)column2.D, (float)row2.D),
+						ElapsedMs = stopwatch.Elapsed.TotalMilliseconds
+					};
 				}
 				catch
 				{
-					return new PointF[0];
+					return BoardSegmentationResult.Invalid("轮廓提取异常");
 				}
 				finally
 				{
