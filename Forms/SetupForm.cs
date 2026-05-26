@@ -577,10 +577,10 @@ namespace PcbPoseAlignInspect.Forms
 				_binding = false;
 				_canvas.FeatureTemplateRoi = CurrentRecipe.FeatureTemplateRoi;
 				_canvas.FeatureRoiShape = CurrentRecipe.FeatureRoiShape;
-				_canvas.Result = result;
+				_canvas.Result = null;
 				UpdateResult(result);
 				SetStatus("特征模板已保存", Color.SeaGreen);
-				MessageBox.Show(this, "特征模板已保存，并记录了特征中心到板中心的偏移关系。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+				MessageBox.Show(this, "特征模板已保存，并记录了特征中心到板中心的偏移关系。换图后可以直接点击“运行检测”测试匹配效果。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
 			}, TaskScheduler.FromCurrentSynchronizationContext());
 		}
 

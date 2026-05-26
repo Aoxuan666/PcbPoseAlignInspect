@@ -46,6 +46,8 @@ namespace PcbPoseAlignInspect.Models
 
 		public RectangleF RuntimeFeatureBounds { get; set; }
 
+		public PointF[] RuntimeFeatureContour { get; set; }
+
 		public RectangleF FeatureSearchRoi { get; set; }
 
 		public RectangleF FeatureTemplateRoi { get; set; }
@@ -72,6 +74,7 @@ namespace PcbPoseAlignInspect.Models
 			Message = string.Empty;
 			NgReasons = InspectNgReason.None;
 			RuntimeBoardBoundingBox = RectangleF.Empty;
+			RuntimeFeatureContour = new PointF[0];
 		}
 
 		public static PcbPoseInspectResult Invalid(string message, InspectNgReason reason)

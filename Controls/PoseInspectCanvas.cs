@@ -427,7 +427,14 @@ namespace PcbPoseAlignInspect.Controls
 				DrawPoint(g, result.RuntimeBoardCenter, Color.FromArgb(255, 255, 80, 80), "C");
 				if (result.FeatureMatchOk && !result.RuntimeFeatureBounds.IsEmpty)
 				{
-					DrawFeatureRoi(g, result.RuntimeFeatureBounds, enabled: true, Color.FromArgb(255, 255, 60, 230), "特征匹配", handles: false);
+					if (result.RuntimeFeatureContour != null && result.RuntimeFeatureContour.Length > 1)
+					{
+						DrawFeatureContour(g, result.RuntimeFeatureContour, Color.FromArgb(255, 255, 60, 230), "特征轮廓");
+					}
+					else
+					{
+						DrawFeatureRoi(g, result.RuntimeFeatureBounds, enabled: true, Color.FromArgb(255, 255, 60, 230), "特征匹配范围", handles: false);
+					}
 					DrawPoint(g, result.RuntimeFeatureCenter, Color.FromArgb(255, 255, 60, 230), "F");
 				}
 			}
@@ -494,7 +501,34 @@ namespace PcbPoseAlignInspect.Controls
 			{
 				DrawHandles(g, rectangleF, color);
 			}
+			if (handles && text == "特征模板ROI")
+			{
+				PointF center = new PointF(roi.Left + roi.Width / 2f, roi.Top + roi.Height / 2f);
+				DrawPoint(g, center, color, "T");
+			}
 			DrawLabel(g, text, rectangleF, color);
+		}
+
+		private void DrawFeatureContour(Graphics g, PointF[] contour, Color color, string text)
+		{
+			if (contour == null || contour.Length < 2 || _image == null)
+			{
+				return;
+			}
+			PointF[] points = new PointF[contour.Length];
+			for (int i = 0; i < contour.Length; i++)
+			{
+				points[i] = ImageToScreen(contour[i]);
+			}
+			using (Pen pen = new Pen(color, 2.2f))
+			{
+				g.DrawLines(pen, points);
+			}
+			RectangleF bounds = BoundsOf(points);
+			if (!bounds.IsEmpty)
+			{
+				DrawLabel(g, text, bounds, color);
+			}
 		}
 
 		private void DrawDrawingPreview(Graphics g, RectangleF roi)
@@ -549,6 +583,31 @@ namespace PcbPoseAlignInspect.Controls
 					}
 				}
 			}
+		}
+
+		private static RectangleF BoundsOf(PointF[] points)
+		{
+			if (points == null || points.Length == 0)
+			{
+				return RectangleF.Empty;
+			}
+			float minX = points[0].X;
+			float minY = points[0].Y;
+			float maxX = points[0].X;
+			float maxY = points[0].Y;
+			for (int i = 1; i < points.Length; i++)
+			{
+				PointF p = points[i];
+				minX = Math.Min(minX, p.X);
+				minY = Math.Min(minY, p.Y);
+				maxX = Math.Max(maxX, p.X);
+				maxY = Math.Max(maxY, p.Y);
+			}
+			if (maxX <= minX || maxY <= minY)
+			{
+				return RectangleF.Empty;
+			}
+			return RectangleF.FromLTRB(minX, minY, maxX, maxY);
 		}
 
 		private RoiHandle HitTestAllRois(Point p, out RoiTarget target)

@@ -27,6 +27,8 @@ namespace PcbPoseAlignInspect.Processing
 			public PointF FeatureCenter;
 
 			public RectangleF FeatureBounds;
+
+			public PointF[] FeatureContour;
 		}
 
 		private sealed class FeatureMatch
@@ -38,6 +40,8 @@ namespace PcbPoseAlignInspect.Processing
 			public PointF Center;
 
 			public RectangleF Bounds;
+
+			public PointF[] Contour;
 		}
 
 		public PcbPoseInspectResult Teach(Bitmap image, PcbPoseInspectRecipe recipe)
@@ -77,6 +81,7 @@ namespace PcbPoseAlignInspect.Processing
 					TeachFeatureCenter = recipe.TeachFeatureCenter,
 					RuntimeFeatureCenter = pose.FeatureCenter,
 					RuntimeFeatureBounds = pose.FeatureBounds,
+					RuntimeFeatureContour = pose.FeatureContour ?? new PointF[0],
 					FeatureSearchRoi = recipe.FeatureSearchRoi,
 					FeatureTemplateRoi = recipe.FeatureTemplateRoi,
 					FeatureRoiShape = recipe.FeatureRoiShape,
@@ -152,6 +157,7 @@ namespace PcbPoseAlignInspect.Processing
 					TeachFeatureCenter = recipe.TeachFeatureCenter,
 					RuntimeFeatureCenter = pose.FeatureCenter,
 					RuntimeFeatureBounds = pose.FeatureBounds,
+					RuntimeFeatureContour = pose.FeatureContour ?? new PointF[0],
 					FeatureSearchRoi = recipe.FeatureSearchRoi,
 					FeatureTemplateRoi = recipe.FeatureTemplateRoi,
 					FeatureRoiShape = recipe.FeatureRoiShape,
@@ -270,7 +276,8 @@ namespace PcbPoseAlignInspect.Processing
 						FeatureMatchOk = (featureMatch?.Ok ?? true),
 						FeatureMatchScore = (featureMatch?.Score ?? 1.0),
 						FeatureCenter = (featureMatch?.Center ?? PointF.Empty),
-						FeatureBounds = (featureMatch?.Bounds ?? RectangleF.Empty)
+						FeatureBounds = (featureMatch?.Bounds ?? RectangleF.Empty),
+						FeatureContour = (featureMatch?.Contour ?? new PointF[0])
 					};
 					return true;
 				}
@@ -523,6 +530,8 @@ namespace PcbPoseAlignInspect.Processing
 					HObject grayImage2 = null;
 					HObject searchRegion = null;
 					HObject imageReduced2 = null;
+					HObject modelContours = null;
+					HObject transformedContours = null;
 					HTuple modelID = null;
 					try
 					{
@@ -530,11 +539,11 @@ namespace PcbPoseAlignInspect.Processing
 						HOperatorSet.Rgb1ToGray(hObject, out grayImage);
 						CreateFeatureRegion(out region, new RectangleF(0f, 0f, bitmap2.Width, bitmap2.Height), recipe.FeatureRoiShape);
 						HOperatorSet.ReduceDomain(grayImage, region, out imageReduced);
-						HOperatorSet.CreateNccModel(imageReduced, "auto", -0.523599, 1.047198, "auto", "use_polarity", out modelID);
+						HOperatorSet.CreateShapeModel(imageReduced, "auto", -0.523599, 1.047198, "auto", "auto", "use_polarity", "auto", "auto", out modelID);
 						HOperatorSet.Rgb1ToGray(hoImage, out grayImage2);
-						CreateFeatureRegion(out searchRegion, new RectangleF(rectangle.Left, rectangle.Top, rectangle.Width, rectangle.Height), recipe.FeatureRoiShape);
+						HOperatorSet.GenRectangle1(out searchRegion, rectangle.Top, rectangle.Left, Math.Max(rectangle.Top, rectangle.Bottom - 1), Math.Max(rectangle.Left, rectangle.Right - 1));
 						HOperatorSet.ReduceDomain(grayImage2, searchRegion, out imageReduced2);
-						HOperatorSet.FindNccModel(imageReduced2, modelID, -0.523599, 1.047198, Math.Max(0.0, Math.Min(1.0, recipe.FeatureMatchMinScore)), 1, 0.5, "true", 0, out var row, out var column, out var _, out var score);
+						HOperatorSet.FindShapeModel(imageReduced2, modelID, -0.523599, 1.047198, Math.Max(0.0, Math.Min(1.0, recipe.FeatureMatchMinScore)), 1, 0.5, "least_squares", 0, 0.8, out var row, out var column, out var angle, out var score);
 						if (score == null || score.Length <= 0)
 						{
 							return new FeatureMatch
@@ -544,13 +553,22 @@ namespace PcbPoseAlignInspect.Processing
 							};
 						}
 						PointF center = new PointF((float)column.D, (float)row.D);
-						RectangleF bounds = new RectangleF(center.X - (float)bitmap2.Width / 2f, center.Y - (float)bitmap2.Height / 2f, bitmap2.Width, bitmap2.Height);
+						HOperatorSet.GetShapeModelContours(out modelContours, modelID, 1);
+						HOperatorSet.VectorAngleToRigid(0.0, 0.0, 0.0, row.D, column.D, angle.D, out var homMat2D);
+						HOperatorSet.AffineTransContourXld(modelContours, out transformedContours, homMat2D);
+						PointF[] contour = XldToContourPoints(transformedContours, 1200);
+						RectangleF bounds = BoundsOf(contour);
+						if (bounds.IsEmpty)
+						{
+							bounds = new RectangleF(center.X - (float)bitmap2.Width / 2f, center.Y - (float)bitmap2.Height / 2f, bitmap2.Width, bitmap2.Height);
+						}
 						return new FeatureMatch
 						{
 							Ok = (score.D >= recipe.FeatureMatchMinScore),
 							Score = score.D,
 							Center = center,
-							Bounds = bounds
+							Bounds = bounds,
+							Contour = contour
 						};
 					}
 					catch
@@ -567,7 +585,7 @@ namespace PcbPoseAlignInspect.Processing
 						{
 							try
 							{
-								HOperatorSet.ClearNccModel(modelID);
+								HOperatorSet.ClearShapeModel(modelID);
 							}
 							catch
 							{
@@ -580,6 +598,8 @@ namespace PcbPoseAlignInspect.Processing
 						DisposeObj(grayImage2);
 						DisposeObj(searchRegion);
 						DisposeObj(imageReduced2);
+						DisposeObj(modelContours);
+						DisposeObj(transformedContours);
 					}
 				}
 			}
@@ -685,6 +705,70 @@ namespace PcbPoseAlignInspect.Processing
 				DisposeObj(contours);
 				DisposeObj(objectSelected);
 			}
+		}
+
+		private static PointF[] XldToContourPoints(HObject contours, int maxPoints)
+		{
+			if (contours == null)
+			{
+				return new PointF[0];
+			}
+			HObject objectSelected = null;
+			try
+			{
+				HOperatorSet.CountObj(contours, out var number);
+				if (number.I <= 0)
+				{
+					return new PointF[0];
+				}
+				HOperatorSet.SelectObj(contours, out objectSelected, 1);
+				HOperatorSet.GetContourXld(objectSelected, out var row, out var col);
+				int num = Math.Min(row.Length, col.Length);
+				if (num <= 1)
+				{
+					return new PointF[0];
+				}
+				int num2 = Math.Max(1, num / Math.Max(100, maxPoints));
+				List<PointF> list = new List<PointF>();
+				for (int i = 0; i < num; i += num2)
+				{
+					list.Add(new PointF((float)col[i].D, (float)row[i].D));
+				}
+				return list.ToArray();
+			}
+			catch
+			{
+				return new PointF[0];
+			}
+			finally
+			{
+				DisposeObj(objectSelected);
+			}
+		}
+
+		private static RectangleF BoundsOf(PointF[] points)
+		{
+			if (points == null || points.Length == 0)
+			{
+				return RectangleF.Empty;
+			}
+			float minX = points[0].X;
+			float minY = points[0].Y;
+			float maxX = points[0].X;
+			float maxY = points[0].Y;
+			for (int i = 1; i < points.Length; i++)
+			{
+				PointF p = points[i];
+				minX = Math.Min(minX, p.X);
+				minY = Math.Min(minY, p.Y);
+				maxX = Math.Max(maxX, p.X);
+				maxY = Math.Max(maxY, p.Y);
+			}
+			if (maxX <= minX || maxY <= minY)
+			{
+				return RectangleF.Empty;
+			}
+			return RectangleF.FromLTRB(minX, minY, maxX, maxY);
 		}
 
 		private static Rectangle ToClippedRectangle(RectangleF roi, int width, int height)
