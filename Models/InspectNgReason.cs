@@ -7,6 +7,7 @@ namespace PcbPoseAlignInspect.Models
 	{
 		None = 0,
 		ParameterInvalid = 1,
+		FeatureMatchFailed = 2,
 		BoardDetectFailed = 4,
 		XOutOfTolerance = 8,
 		YOutOfTolerance = 0x10,

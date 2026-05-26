@@ -29,6 +29,8 @@ namespace PcbPoseAlignInspect.Processing
 			public RectangleF FeatureBounds;
 
 			public PointF[] FeatureContour;
+
+			public bool FeatureCandidateFound;
 		}
 
 		private sealed class FeatureMatch
@@ -42,6 +44,8 @@ namespace PcbPoseAlignInspect.Processing
 			public RectangleF Bounds;
 
 			public PointF[] Contour;
+
+			public bool CandidateFound;
 		}
 
 		public PcbPoseInspectResult Teach(Bitmap image, PcbPoseInspectRecipe recipe)
@@ -123,7 +127,7 @@ namespace PcbPoseAlignInspect.Processing
 				double num4 = Math.Abs(num3) * Math.PI / 180.0 * Math.Max(1.0, recipe.AngleRadiusPx);
 				double num5 = Math.Max(Math.Max(Math.Abs(num), Math.Abs(num2)), num4);
 				double num6 = (toleranceOverridePx.HasValue ? toleranceOverridePx.Value : recipe.UnifiedTolerancePx);
-				InspectNgReason inspectNgReason = InspectNgReason.None;
+				InspectNgReason inspectNgReason = pose.FeatureMatchOk ? InspectNgReason.None : InspectNgReason.FeatureMatchFailed;
 				if (Math.Abs(num) > num6)
 				{
 					inspectNgReason |= InspectNgReason.XOutOfTolerance;
@@ -144,7 +148,7 @@ namespace PcbPoseAlignInspect.Processing
 				return new PcbPoseInspectResult
 				{
 					Success = flag,
-					Message = (flag ? "OK" : ("NG: " + inspectNgReason)),
+					Message = BuildInspectMessage(flag, inspectNgReason, pose, recipe),
 					NgReasons = inspectNgReason,
 					BoardDetectOk = true,
 					FeatureMatchOk = pose.FeatureMatchOk,
@@ -236,6 +240,19 @@ namespace PcbPoseAlignInspect.Processing
 			}
 		}
 
+		private static string BuildInspectMessage(bool success, InspectNgReason reason, DetectedPose pose, PcbPoseInspectRecipe recipe)
+		{
+			if (success)
+			{
+				return "OK";
+			}
+			if ((reason & InspectNgReason.FeatureMatchFailed) != 0)
+			{
+				return "NG: 模板分数 " + pose.FeatureMatchScore.ToString("F3") + " 低于最小分数 " + recipe.FeatureMatchMinScore.ToString("F3");
+			}
+			return "NG: " + reason.ToString();
+		}
+
 		private static bool TryDetectPose(Bitmap bitmap, PcbPoseInspectRecipe recipe, bool inspectMode, out DetectedPose pose, out string error)
 		{
 			pose = null;
@@ -260,12 +277,15 @@ namespace PcbPoseAlignInspect.Processing
 					if (recipe.EnableFeatureTemplateMatch && recipe.HasFeatureTemplate())
 					{
 						featureMatch = MatchFeatureTemplate(hObject, bitmap2.Width, bitmap2.Height, recipe);
-						if (!featureMatch.Ok)
+						if (!featureMatch.CandidateFound)
 						{
-							error = "特征模板匹配失败，请检查特征搜索ROI、模板ROI、最小分数或图像清晰度";
+							error = "未找到特征模板候选，请检查特征搜索ROI是否覆盖目标、模板ROI是否包含清晰外轮廓";
 							return false;
 						}
-						center = new PointF(featureMatch.Center.X + recipe.FeatureToBoardOffset.X, featureMatch.Center.Y + recipe.FeatureToBoardOffset.Y);
+						if (featureMatch.Ok)
+						{
+							center = new PointF(featureMatch.Center.X + recipe.FeatureToBoardOffset.X, featureMatch.Center.Y + recipe.FeatureToBoardOffset.Y);
+						}
 					}
 					pose = new DetectedPose
 					{
@@ -277,7 +297,8 @@ namespace PcbPoseAlignInspect.Processing
 						FeatureMatchScore = (featureMatch?.Score ?? 1.0),
 						FeatureCenter = (featureMatch?.Center ?? PointF.Empty),
 						FeatureBounds = (featureMatch?.Bounds ?? RectangleF.Empty),
-						FeatureContour = (featureMatch?.Contour ?? new PointF[0])
+						FeatureContour = (featureMatch?.Contour ?? new PointF[0]),
+						FeatureCandidateFound = (featureMatch?.CandidateFound ?? false)
 					};
 					return true;
 				}
@@ -543,13 +564,14 @@ namespace PcbPoseAlignInspect.Processing
 						HOperatorSet.Rgb1ToGray(hoImage, out grayImage2);
 						HOperatorSet.GenRectangle1(out searchRegion, rectangle.Top, rectangle.Left, Math.Max(rectangle.Top, rectangle.Bottom - 1), Math.Max(rectangle.Left, rectangle.Right - 1));
 						HOperatorSet.ReduceDomain(grayImage2, searchRegion, out imageReduced2);
-						HOperatorSet.FindShapeModel(imageReduced2, modelID, -0.523599, 1.047198, Math.Max(0.0, Math.Min(1.0, recipe.FeatureMatchMinScore)), 1, 0.5, "least_squares", 0, 0.8, out var row, out var column, out var angle, out var score);
+						HOperatorSet.FindShapeModel(imageReduced2, modelID, -0.523599, 1.047198, 0.2, 1, 0.5, "least_squares", 0, 0.8, out var row, out var column, out var angle, out var score);
 						if (score == null || score.Length <= 0)
 						{
 							return new FeatureMatch
 							{
 								Ok = false,
-								Score = 0.0
+								Score = 0.0,
+								CandidateFound = false
 							};
 						}
 						PointF center = new PointF((float)column.D, (float)row.D);
@@ -568,7 +590,8 @@ namespace PcbPoseAlignInspect.Processing
 							Score = score.D,
 							Center = center,
 							Bounds = bounds,
-							Contour = contour
+							Contour = contour,
+							CandidateFound = true
 						};
 					}
 					catch

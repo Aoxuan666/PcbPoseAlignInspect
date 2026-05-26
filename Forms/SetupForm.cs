@@ -861,7 +861,7 @@ namespace PcbPoseAlignInspect.Forms
 			_lblDy.Text = "Y偏移(px): " + result.DyPx.ToString("F3");
 			_lblAngle.Text = "角度差(deg): " + result.AngleDeltaDeg.ToString("F4");
 			_lblScore.Text = "综合偏差(px): " + result.ScorePx.ToString("F3") + " / tol " + result.UsedTolerancePx.ToString("F3");
-			_lblFeatureScore.Text = result.FeatureMatchOk ? "模板分数: " + result.FeatureMatchScore.ToString("F3") : "模板分数: NG";
+			_lblFeatureScore.Text = result.FeatureMatchOk ? "模板分数: " + result.FeatureMatchScore.ToString("F3") : "模板分数: " + result.FeatureMatchScore.ToString("F3") + " NG";
 			_lblElapsed.Text = "耗时(ms): " + result.ElapsedMs.ToString("F1");
 		}
 

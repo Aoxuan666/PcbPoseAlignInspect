@@ -425,17 +425,17 @@ namespace PcbPoseAlignInspect.Controls
 					DrawRoi(g, result.RuntimeBoardBoundingBox, enabled: true, Color.FromArgb(255, 60, 255, 80), "检测板框", handles: false);
 				}
 				DrawPoint(g, result.RuntimeBoardCenter, Color.FromArgb(255, 255, 80, 80), "C");
-				if (result.FeatureMatchOk && !result.RuntimeFeatureBounds.IsEmpty)
+				if (!result.RuntimeFeatureBounds.IsEmpty)
 				{
 					if (result.RuntimeFeatureContour != null && result.RuntimeFeatureContour.Length > 1)
 					{
-						DrawFeatureContour(g, result.RuntimeFeatureContour, Color.FromArgb(255, 255, 60, 230), "特征轮廓");
+						DrawFeatureContour(g, result.RuntimeFeatureContour, result.FeatureMatchOk ? Color.FromArgb(255, 255, 60, 230) : Color.FromArgb(255, 255, 120, 60), result.FeatureMatchOk ? "特征轮廓" : "低分候选");
 					}
 					else
 					{
-						DrawFeatureRoi(g, result.RuntimeFeatureBounds, enabled: true, Color.FromArgb(255, 255, 60, 230), "特征匹配范围", handles: false);
+						DrawFeatureRoi(g, result.RuntimeFeatureBounds, enabled: true, result.FeatureMatchOk ? Color.FromArgb(255, 255, 60, 230) : Color.FromArgb(255, 255, 120, 60), result.FeatureMatchOk ? "特征匹配范围" : "低分候选", handles: false);
 					}
-					DrawPoint(g, result.RuntimeFeatureCenter, Color.FromArgb(255, 255, 60, 230), "F");
+					DrawPoint(g, result.RuntimeFeatureCenter, result.FeatureMatchOk ? Color.FromArgb(255, 255, 60, 230) : Color.FromArgb(255, 255, 120, 60), "F");
 				}
 			}
 		}
