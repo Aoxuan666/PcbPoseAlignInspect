@@ -8,7 +8,7 @@ using PcbPoseAlignInspect.Models;
 
 namespace PcbPoseAlignInspect.Processing
 {
-	public sealed class PcbPoseInspectProcessor
+	public sealed class PcbPoseInspectProcessor : IDisposable
 	{
 		private sealed class DetectedPose
 		{
@@ -50,6 +50,24 @@ namespace PcbPoseAlignInspect.Processing
 			public bool CandidateFound;
 
 			public string Message;
+		}
+
+		private sealed class CachedFeatureModel
+		{
+			public string Key;
+
+			public HTuple ModelId;
+
+			public int TemplateWidth;
+
+			public int TemplateHeight;
+		}
+
+		private CachedFeatureModel _featureModel;
+
+		public void Dispose()
+		{
+			ClearFeatureModel();
 		}
 
 		public PcbPoseInspectResult Teach(Bitmap image, PcbPoseInspectRecipe recipe)
@@ -257,7 +275,7 @@ namespace PcbPoseAlignInspect.Processing
 			return "NG: " + reason.ToString();
 		}
 
-		private static bool TryDetectPose(Bitmap bitmap, PcbPoseInspectRecipe recipe, bool inspectMode, out DetectedPose pose, out string error)
+		private bool TryDetectPose(Bitmap bitmap, PcbPoseInspectRecipe recipe, bool inspectMode, out DetectedPose pose, out string error)
 		{
 			pose = null;
 			error = string.Empty;
@@ -521,7 +539,7 @@ namespace PcbPoseAlignInspect.Processing
 			}
 		}
 
-		private static FeatureMatch MatchFeatureTemplate(HObject hoImage, int width, int height, PcbPoseInspectRecipe recipe)
+		private FeatureMatch MatchFeatureTemplate(HObject hoImage, int width, int height, PcbPoseInspectRecipe recipe)
 		{
 			if (hoImage == null || recipe == null || !recipe.HasFeatureTemplate())
 			{
@@ -532,101 +550,144 @@ namespace PcbPoseAlignInspect.Processing
 					Message = "特征模板为空，请先保存特征模板"
 				};
 			}
+
 			Rectangle rectangle = ToClippedRectangle(recipe.FeatureSearchRoi, width, height);
 			if (rectangle.Width <= 1 || rectangle.Height <= 1)
 			{
 				rectangle = new Rectangle(0, 0, width, height);
 			}
-			using (Bitmap bitmap = recipe.CreateFeatureTemplateImage())
+
+			HObject grayImage = null;
+			HObject matchProcessed = null;
+			HObject searchRegion = null;
+			HObject imageReduced = null;
+			HObject modelContours = null;
+			HObject transformedContours = null;
+			try
 			{
-				if (bitmap == null || bitmap.Width <= 1 || bitmap.Height <= 1)
+				CachedFeatureModel model = GetOrCreateFeatureModel(recipe);
+				if (model == null || model.ModelId == null)
 				{
 					return new FeatureMatch
 					{
 						Ok = false,
 						Score = 0.0,
-						Message = "特征模板图像无效，请重新框选并保存模板"
+						Message = "特征模板模型创建失败，请重新框选清晰外轮廓并保存模板"
 					};
+				}
+
+				HOperatorSet.Rgb1ToGray(hoImage, out grayImage);
+				int matchMean = Math.Max(1, recipe.FeatureMatchMeanSize);
+				HOperatorSet.MeanImage(grayImage, out matchProcessed, matchMean, matchMean);
+				HOperatorSet.GenRectangle1(out searchRegion, rectangle.Top, rectangle.Left, Math.Max(rectangle.Top, rectangle.Bottom - 1), Math.Max(rectangle.Left, rectangle.Right - 1));
+				HOperatorSet.ReduceDomain(matchProcessed, searchRegion, out imageReduced);
+				double scaleMin = GetFeatureScaleMin(recipe);
+				double scaleMax = GetFeatureScaleMax(recipe);
+				double passScore = Math.Max(0.01, Math.Min(1.0, recipe.FeatureMatchMinScore));
+				double searchScore = Math.Min(passScore, 0.2);
+				double greediness = Math.Max(0.0, Math.Min(1.0, recipe.FeatureGreediness));
+				HOperatorSet.FindScaledShapeModel(imageReduced, model.ModelId, 0.0, new HTuple(360).TupleRad(), scaleMin, scaleMax, searchScore, 1, 0.5, "none", 0, greediness, out var row, out var column, out var angle, out var scale, out var score);
+				if (score == null || score.Length <= 0)
+				{
+					return new FeatureMatch
+					{
+						Ok = false,
+						Score = 0.0,
+						CandidateFound = false,
+						Message = "未找到特征模板候选。请确认搜索ROI覆盖目标，或把最小分数先调到0.10到0.20观察候选。"
+					};
+				}
+
+				PointF center = new PointF((float)column.D, (float)row.D);
+				HOperatorSet.GetShapeModelContours(out modelContours, model.ModelId, 1);
+				HOperatorSet.HomMat2dIdentity(out var homMat2DIdentity);
+				HOperatorSet.HomMat2dScale(homMat2DIdentity, scale.D, scale.D, 0.0, 0.0, out var homMat2DScale);
+				HOperatorSet.HomMat2dRotate(homMat2DScale, angle.D, 0.0, 0.0, out var homMat2DRotate);
+				HOperatorSet.HomMat2dTranslate(homMat2DRotate, row.D, column.D, out var homMat2D);
+				HOperatorSet.AffineTransContourXld(modelContours, out transformedContours, homMat2D);
+				PointF[] contour = XldToContourPoints(transformedContours, 1200);
+				RectangleF bounds = BoundsOf(contour);
+				if (bounds.IsEmpty)
+				{
+					bounds = new RectangleF(center.X - model.TemplateWidth / 2f, center.Y - model.TemplateHeight / 2f, model.TemplateWidth, model.TemplateHeight);
+				}
+
+				return new FeatureMatch
+				{
+					Ok = score.D >= passScore,
+					Score = score.D,
+					Scale = scale.D,
+					Center = center,
+					Bounds = bounds,
+					Contour = contour,
+					CandidateFound = true,
+					Message = "找到候选"
+				};
+			}
+			catch (Exception ex)
+			{
+				return new FeatureMatch
+				{
+					Ok = false,
+					Score = 0.0,
+					CandidateFound = false,
+					Message = "特征模板匹配异常: " + ex.Message
+				};
+			}
+			finally
+			{
+				DisposeObj(grayImage);
+				DisposeObj(matchProcessed);
+				DisposeObj(searchRegion);
+				DisposeObj(imageReduced);
+				DisposeObj(modelContours);
+				DisposeObj(transformedContours);
+			}
+		}
+
+		private CachedFeatureModel GetOrCreateFeatureModel(PcbPoseInspectRecipe recipe)
+		{
+			string key = BuildFeatureModelKey(recipe);
+			if (_featureModel != null && _featureModel.Key == key && _featureModel.ModelId != null)
+			{
+				return _featureModel;
+			}
+
+			ClearFeatureModel();
+			using (Bitmap bitmap = recipe.CreateFeatureTemplateImage())
+			{
+				if (bitmap == null || bitmap.Width <= 1 || bitmap.Height <= 1)
+				{
+					return null;
 				}
 				using (Bitmap bitmap2 = To24bpp(bitmap))
 				{
 					HObject hObject = null;
 					HObject grayImage = null;
+					HObject processed = null;
 					HObject region = null;
-					HObject imageReduced = null;
-					HObject grayImage2 = null;
-					HObject searchRegion = null;
-					HObject imageReduced2 = null;
-					HObject modelContours = null;
-					HObject transformedContours = null;
-					HObject templateProcessed = null;
-					HObject templateReduced = null;
-					HObject matchProcessed = null;
+					HObject reduced = null;
+					HObject cropped = null;
 					HTuple modelID = null;
 					try
 					{
 						hObject = CreateHalconImageFromBitmap(bitmap2);
 						HOperatorSet.Rgb1ToGray(hObject, out grayImage);
-						int templateMean = Math.Max(1, recipe.FeatureTemplateMeanSize);
-						HOperatorSet.MeanImage(grayImage, out templateProcessed, templateMean, templateMean);
+						int mean = Math.Max(1, recipe.FeatureTemplateMeanSize);
+						HOperatorSet.MeanImage(grayImage, out processed, mean, mean);
 						CreateFeatureRegion(out region, new RectangleF(0f, 0f, bitmap2.Width, bitmap2.Height), recipe.FeatureRoiShape);
-						HOperatorSet.ReduceDomain(templateProcessed, region, out templateReduced);
-						HOperatorSet.CropDomain(templateReduced, out imageReduced);
-						double scaleMin = Math.Max(0.05, Math.Min(recipe.FeatureScaleMin, recipe.FeatureScaleMax));
-						double scaleMax = Math.Max(scaleMin, Math.Max(recipe.FeatureScaleMin, recipe.FeatureScaleMax));
-						HOperatorSet.CreateScaledShapeModel(imageReduced, "auto", 0.0, new HTuple(360).TupleRad(), "auto", scaleMin, scaleMax, "auto", "auto", "use_polarity", "auto", 2, out modelID);
-						HOperatorSet.Rgb1ToGray(hoImage, out grayImage2);
-						int matchMean = Math.Max(1, recipe.FeatureMatchMeanSize);
-						HOperatorSet.MeanImage(grayImage2, out matchProcessed, matchMean, matchMean);
-						HOperatorSet.GenRectangle1(out searchRegion, rectangle.Top, rectangle.Left, Math.Max(rectangle.Top, rectangle.Bottom - 1), Math.Max(rectangle.Left, rectangle.Right - 1));
-						HOperatorSet.ReduceDomain(matchProcessed, searchRegion, out imageReduced2);
-						double minScore = Math.Max(0.01, Math.Min(1.0, recipe.FeatureMatchMinScore));
-						double greediness = Math.Max(0.0, Math.Min(1.0, recipe.FeatureGreediness));
-						HOperatorSet.FindScaledShapeModel(imageReduced2, modelID, 0.0, new HTuple(360).TupleRad(), scaleMin, scaleMax, minScore, 1, 0.5, "none", 0, greediness, out var row, out var column, out var angle, out var scale, out var score);
-						if (score == null || score.Length <= 0)
+						HOperatorSet.ReduceDomain(processed, region, out reduced);
+						HOperatorSet.CropDomain(reduced, out cropped);
+						HOperatorSet.CreateScaledShapeModel(cropped, "auto", 0.0, new HTuple(360).TupleRad(), "auto", GetFeatureScaleMin(recipe), GetFeatureScaleMax(recipe), "auto", "auto", "use_polarity", "auto", 2, out modelID);
+						_featureModel = new CachedFeatureModel
 						{
-							return new FeatureMatch
-							{
-								Ok = false,
-								Score = 0.0,
-								CandidateFound = false,
-								Message = "未找到特征模板候选。建议降低最小分数，放宽缩放范围，并确认搜索ROI覆盖目标。"
-							};
-						}
-						PointF center = new PointF((float)column.D, (float)row.D);
-						HOperatorSet.GetShapeModelContours(out modelContours, modelID, 1);
-						HOperatorSet.HomMat2dIdentity(out var homMat2DIdentity);
-						HOperatorSet.HomMat2dScale(homMat2DIdentity, scale.D, scale.D, 0.0, 0.0, out var homMat2DScale);
-						HOperatorSet.HomMat2dRotate(homMat2DScale, angle.D, 0.0, 0.0, out var homMat2DRotate);
-						HOperatorSet.HomMat2dTranslate(homMat2DRotate, row.D, column.D, out var homMat2D);
-						HOperatorSet.AffineTransContourXld(modelContours, out transformedContours, homMat2D);
-						PointF[] contour = XldToContourPoints(transformedContours, 1200);
-						RectangleF bounds = BoundsOf(contour);
-						if (bounds.IsEmpty)
-						{
-							bounds = new RectangleF(center.X - (float)bitmap2.Width / 2f, center.Y - (float)bitmap2.Height / 2f, bitmap2.Width, bitmap2.Height);
-						}
-						return new FeatureMatch
-						{
-							Ok = (score.D >= recipe.FeatureMatchMinScore),
-							Score = score.D,
-							Scale = scale.D,
-							Center = center,
-							Bounds = bounds,
-							Contour = contour,
-							CandidateFound = true,
-							Message = "找到候选"
+							Key = key,
+							ModelId = modelID,
+							TemplateWidth = bitmap2.Width,
+							TemplateHeight = bitmap2.Height
 						};
-					}
-					catch (Exception ex)
-					{
-						return new FeatureMatch
-						{
-							Ok = false,
-							Score = 0.0,
-							CandidateFound = false,
-							Message = "特征模板匹配异常: " + ex.Message
-						};
+						modelID = null;
+						return _featureModel;
 					}
 					finally
 					{
@@ -642,19 +703,63 @@ namespace PcbPoseAlignInspect.Processing
 						}
 						DisposeObj(hObject);
 						DisposeObj(grayImage);
+						DisposeObj(processed);
 						DisposeObj(region);
-						DisposeObj(imageReduced);
-						DisposeObj(grayImage2);
-						DisposeObj(searchRegion);
-						DisposeObj(imageReduced2);
-						DisposeObj(modelContours);
-						DisposeObj(transformedContours);
-						DisposeObj(templateProcessed);
-						DisposeObj(templateReduced);
-						DisposeObj(matchProcessed);
+						DisposeObj(reduced);
+						DisposeObj(cropped);
 					}
 				}
 			}
+		}
+
+		private void ClearFeatureModel()
+		{
+			if (_featureModel == null || _featureModel.ModelId == null)
+			{
+				_featureModel = null;
+				return;
+			}
+			try
+			{
+				HOperatorSet.ClearShapeModel(_featureModel.ModelId);
+			}
+			catch
+			{
+			}
+			_featureModel = null;
+		}
+
+		private static string BuildFeatureModelKey(PcbPoseInspectRecipe recipe)
+		{
+			int imageHash = HashBytes(recipe.FeatureTemplateImagePng);
+			return string.Join("|", imageHash.ToString(), recipe.FeatureRoiShape.ToString(), recipe.FeatureTemplateMeanSize.ToString(), GetFeatureScaleMin(recipe).ToString("F4"), GetFeatureScaleMax(recipe).ToString("F4"));
+		}
+
+		private static int HashBytes(byte[] bytes)
+		{
+			if (bytes == null)
+			{
+				return 0;
+			}
+			unchecked
+			{
+				int hash = 17;
+				for (int i = 0; i < bytes.Length; i++)
+				{
+					hash = hash * 31 + bytes[i];
+				}
+				return hash;
+			}
+		}
+
+		private static double GetFeatureScaleMin(PcbPoseInspectRecipe recipe)
+		{
+			return Math.Max(0.05, Math.Min(recipe.FeatureScaleMin, recipe.FeatureScaleMax));
+		}
+
+		private static double GetFeatureScaleMax(PcbPoseInspectRecipe recipe)
+		{
+			return Math.Max(GetFeatureScaleMin(recipe), Math.Max(recipe.FeatureScaleMin, recipe.FeatureScaleMax));
 		}
 
 		private static void CreateFeatureRegion(out HObject region, RectangleF roi, FeatureRoiShape shape)

@@ -125,6 +125,7 @@ namespace PcbPoseAlignInspect.Forms
 			_previewTimer.Stop();
 			_previewTimer.Dispose();
 			_toolTip.Dispose();
+			_processor.Dispose();
 			DisposeBitmap(ref _startupImage);
 			DisposeBitmap(ref _currentImage);
 			DisposeBitmap(ref _previewImage);
@@ -258,7 +259,7 @@ namespace PcbPoseAlignInspect.Forms
 			_cmbFeatureShape.Items.Add(FeatureRoiShape.Circle);
 			featureGroup.Controls.Add(_cmbFeatureShape);
 			_numFeatureMinScore = AddSingleNumericRow(featureGroup, "最小分数", 140, 0m, 1m, 2);
-			SetTip(_numFeatureMinScore, "外轮廓模板的通过分数。调试时建议先用0.30到0.45，稳定后再逐步提高。");
+			SetTip(_numFeatureMinScore, "外轮廓模板的通过分数。程序会先用较低阈值找候选，再用该分数判定OK/NG。");
 			_numFeatureTemplateMean = AddSingleNumericRow(featureGroup, "模板滤波", 174, 1m, 31m, 0);
 			SetTip(_numFeatureTemplateMean, "保存模板时的均值滤波尺寸。值越大越平滑，能减弱噪声，也可能抹掉细边。");
 			_numFeatureMatchMean = AddSingleNumericRow(featureGroup, "匹配滤波", 208, 1m, 31m, 0);
