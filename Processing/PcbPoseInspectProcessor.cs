@@ -635,12 +635,10 @@ namespace PcbPoseAlignInspect.Processing
 				HOperatorSet.MeanImage(grayImage, out matchProcessed, matchMean, matchMean);
 				HOperatorSet.GenRectangle1(out searchRegion, rectangle.Top, rectangle.Left, Math.Max(rectangle.Top, rectangle.Bottom - 1), Math.Max(rectangle.Left, rectangle.Right - 1));
 				HOperatorSet.ReduceDomain(matchProcessed, searchRegion, out imageReduced);
-				double scaleMin = GetFeatureScaleMin(recipe);
-				double scaleMax = GetFeatureScaleMax(recipe);
 				double passScore = Math.Max(0.01, Math.Min(1.0, recipe.FeatureMatchMinScore));
 				double searchScore = Math.Min(passScore, 0.1);
 				double greediness = Math.Max(0.0, Math.Min(1.0, recipe.FeatureGreediness));
-				HOperatorSet.FindScaledShapeModel(imageReduced, model.ModelId, new HTuple(-20).TupleRad(), new HTuple(40).TupleRad(), scaleMin, scaleMax, searchScore, 10, 0.5, "least_squares", 0, greediness, out var row, out var column, out var angle, out var scale, out var score);
+				HOperatorSet.FindShapeModel(imageReduced, model.ModelId, new HTuple(-20).TupleRad(), new HTuple(40).TupleRad(), searchScore, 10, 0.5, "least_squares", 0, greediness, out var row, out var column, out var angle, out var score);
 				if (score == null || score.Length <= 0)
 				{
 					return new FeatureMatch
@@ -648,7 +646,7 @@ namespace PcbPoseAlignInspect.Processing
 						Ok = false,
 						Score = 0.0,
 						CandidateFound = false,
-						Message = "未找到特征模板候选。搜索ROI=" + rectangle + "，缩放=" + scaleMin.ToString("F2") + "~" + scaleMax.ToString("F2") + "，搜索分数=" + searchScore.ToString("F2") + "。请确认ROI覆盖目标，或重新框选清晰外轮廓保存模板。"
+						Message = "未找到特征模板候选。搜索ROI=" + rectangle + "，搜索分数=" + searchScore.ToString("F2") + "。请确认ROI覆盖目标，或重新框选清晰外轮廓保存模板。"
 					};
 				}
 
@@ -657,12 +655,11 @@ namespace PcbPoseAlignInspect.Processing
 				double bestRow = row[bestIndex].D;
 				double bestColumn = column[bestIndex].D;
 				double bestAngle = angle[bestIndex].D;
-				double bestScale = scale[bestIndex].D;
+				double bestScale = 1.0;
 				PointF center = new PointF((float)bestColumn, (float)bestRow);
 				HOperatorSet.GetShapeModelContours(out modelContours, model.ModelId, 1);
 				HOperatorSet.HomMat2dIdentity(out var homMat2DIdentity);
-				HOperatorSet.HomMat2dScale(homMat2DIdentity, bestScale, bestScale, 0.0, 0.0, out var homMat2DScale);
-				HOperatorSet.HomMat2dRotate(homMat2DScale, bestAngle, 0.0, 0.0, out var homMat2DRotate);
+				HOperatorSet.HomMat2dRotate(homMat2DIdentity, bestAngle, 0.0, 0.0, out var homMat2DRotate);
 				HOperatorSet.HomMat2dTranslate(homMat2DRotate, bestRow, bestColumn, out var homMat2D);
 				HOperatorSet.AffineTransContourXld(modelContours, out transformedContours, homMat2D);
 				PointF[] contour = XldToContourPoints(transformedContours, 1200);
@@ -727,7 +724,8 @@ namespace PcbPoseAlignInspect.Processing
 					HObject processed = null;
 					HObject region = null;
 					HObject reduced = null;
-					HObject cropped = null;
+					HObject edges = null;
+					HObject modelEdges = null;
 					HTuple modelID = null;
 					try
 					{
@@ -737,8 +735,14 @@ namespace PcbPoseAlignInspect.Processing
 						HOperatorSet.MeanImage(grayImage, out processed, mean, mean);
 						CreateFeatureRegion(out region, new RectangleF(0f, 0f, bitmap2.Width, bitmap2.Height), recipe.FeatureRoiShape);
 						HOperatorSet.ReduceDomain(processed, region, out reduced);
-						HOperatorSet.CropDomain(reduced, out cropped);
-						HOperatorSet.CreateScaledShapeModel(cropped, "auto", new HTuple(-20).TupleRad(), new HTuple(40).TupleRad(), "auto", GetFeatureScaleMin(recipe), GetFeatureScaleMax(recipe), "auto", "auto", "ignore_global_polarity", "auto", 2, out modelID);
+						HOperatorSet.EdgesSubPix(reduced, out edges, "canny", 1.2, 20, 40);
+						HOperatorSet.SelectShapeXld(edges, out modelEdges, "contlength", "and", 12, 999999);
+						HOperatorSet.CountObj(modelEdges, out var edgeCount);
+						if (edgeCount.I <= 0)
+						{
+							return null;
+						}
+						HOperatorSet.CreateShapeModelXld(modelEdges, "auto", new HTuple(-20).TupleRad(), new HTuple(40).TupleRad(), "auto", "auto", "ignore_global_polarity", 20, out modelID);
 						_featureModel = new CachedFeatureModel
 						{
 							Key = key,
@@ -766,7 +770,8 @@ namespace PcbPoseAlignInspect.Processing
 						DisposeObj(processed);
 						DisposeObj(region);
 						DisposeObj(reduced);
-						DisposeObj(cropped);
+						DisposeObj(edges);
+						DisposeObj(modelEdges);
 					}
 				}
 			}
