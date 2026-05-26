@@ -9,6 +9,11 @@ $sourceExtensions = @(
     '.resx', '.settings', '.props', '.targets'
 )
 
+$git = 'git'
+if (-not (Get-Command $git -ErrorAction SilentlyContinue)) {
+    $git = 'C:\Program Files\Git\cmd\git.exe'
+}
+
 $bad = New-Object System.Collections.Generic.List[string]
 
 foreach ($path in $Paths) {
@@ -21,11 +26,12 @@ foreach ($path in $Paths) {
         continue
     }
 
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+    $blob = & $git show ":$path" 2>$null
+    if ($LASTEXITCODE -ne 0) {
         continue
     }
 
-    $bytes = [System.IO.File]::ReadAllBytes($path)
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes(($blob -join "`n"))
     if ($bytes.Length -eq 0) {
         continue
     }
