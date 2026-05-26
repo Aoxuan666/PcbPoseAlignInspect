@@ -13,8 +13,10 @@ namespace PcbPoseAlignInspect.Forms
 	public sealed class SetupForm : Form
 	{
 		private const int MaxPreviewSide = 1000;
+		private const int RightPanelWidth = 430;
 
 		private readonly PcbPoseInspectProcessor _processor = new PcbPoseInspectProcessor();
+		private readonly SplitContainer _splitContainer;
 		private readonly PoseInspectCanvas _canvas;
 		private readonly Timer _previewTimer;
 
@@ -68,30 +70,30 @@ namespace PcbPoseAlignInspect.Forms
 		{
 			CurrentRecipe = new PcbPoseInspectRecipe();
 			Text = "PcbPoseAlignInspect - PCB摆盘检测配置";
-			Width = 1500;
-			Height = 960;
+			Width = 1360;
+			Height = 820;
 			StartPosition = FormStartPosition.CenterScreen;
-			MinimumSize = new Size(1180, 760);
+			MinimumSize = new Size(1024, 700);
 			Font = new Font("Microsoft YaHei UI", 9f);
 
-			SplitContainer splitContainer = new SplitContainer();
-			splitContainer.Dock = DockStyle.Fill;
-			splitContainer.FixedPanel = FixedPanel.Panel2;
-			//splitContainer.Panel2MinSize = 430;
-			splitContainer.SplitterDistance = 1030;
-			Controls.Add(splitContainer);
+			_splitContainer = new SplitContainer();
+			_splitContainer.Dock = DockStyle.Fill;
+			_splitContainer.FixedPanel = FixedPanel.Panel2;
+			_splitContainer.SplitterWidth = 6;
+			Controls.Add(_splitContainer);
 
 			_canvas = new PoseInspectCanvas();
 			_canvas.Dock = DockStyle.Fill;
 			_canvas.RoiChanged += CanvasOnRoiChanged;
-			splitContainer.Panel1.Controls.Add(_canvas);
+			_splitContainer.Panel1.Controls.Add(_canvas);
 
 			Panel rightPanel = new Panel();
 			rightPanel.Dock = DockStyle.Fill;
-			rightPanel.AutoScroll = true;
+			rightPanel.AutoScroll = false;
 			rightPanel.Padding = new Padding(10);
-			splitContainer.Panel2.Controls.Add(rightPanel);
+			_splitContainer.Panel2.Controls.Add(rightPanel);
 			BuildRightPanel(rightPanel);
+			Shown += delegate { BeginInvoke(new Action(ApplyInitialSplitterDistance)); };
 
 			_previewTimer = new Timer();
 			_previewTimer.Interval = 260;
@@ -137,8 +139,17 @@ namespace PcbPoseAlignInspect.Forms
 
 		private void BuildRightPanel(Control parent)
 		{
-			int y = 10;
-			GroupBox imageGroup = AddGroup(parent, "1. 图像与视图", y, 150);
+			TabControl tabs = new TabControl();
+			tabs.Dock = DockStyle.Fill;
+			parent.Controls.Add(tabs);
+
+			TabPage boardPage = new TabPage("图像与分割");
+			TabPage resultPage = new TabPage("特征与结果");
+			tabs.TabPages.Add(boardPage);
+			tabs.TabPages.Add(resultPage);
+
+			int y = 8;
+			GroupBox imageGroup = AddGroup(boardPage, "1. 图像与视图", y, 150);
 			AddButton(imageGroup, "加载图片", 12, 28, 122, 30, BtnLoadImageOnClick);
 			_btnUseStartupImage = AddButton(imageGroup, "使用传入图像", 146, 28, 122, 30, BtnUseStartupImageOnClick);
 			_btnUseStartupImage.Enabled = _startupImage != null;
@@ -159,8 +170,8 @@ namespace PcbPoseAlignInspect.Forms
 			_txtImagePath.SetBounds(12, 110, 390, 24);
 			imageGroup.Controls.Add(_txtImagePath);
 
-			y += 160;
-			GroupBox boardGroup = AddGroup(parent, "2. PCB板体分割", y, 390);
+			y += 158;
+			GroupBox boardGroup = AddGroup(boardPage, "2. PCB板体分割", y, 390);
 			AddRangeRow(boardGroup, "H 范围", 28, out _numHueMin, out _numHueMax);
 			AddRangeRow(boardGroup, "S 范围", 62, out _numSatMin, out _numSatMax);
 			AddRangeRow(boardGroup, "V 范围", 96, out _numValMin, out _numValMax);
@@ -177,8 +188,8 @@ namespace PcbPoseAlignInspect.Forms
 			AddButton(boardGroup, "推荐PCB参数", 142, 328, 126, 30, BtnApplyPcbPresetOnClick);
 			_btnTeachBoard = AddButton(boardGroup, "保存板体示教", 280, 328, 122, 30, BtnTeachBoardOnClick);
 
-			y += 400;
-			GroupBox featureGroup = AddGroup(parent, "3. 特征模板定位", y, 210);
+			y = 8;
+			GroupBox featureGroup = AddGroup(resultPage, "3. 特征模板定位", y, 210);
 			AddButton(featureGroup, "画搜索ROI", 12, 28, 122, 30, delegate
 			{
 				RequireImageThenSetMode(PoseInspectCanvas.CanvasTeachMode.DrawFeatureSearchRoi);
@@ -198,8 +209,8 @@ namespace PcbPoseAlignInspect.Forms
 			featureGroup.Controls.Add(_cmbFeatureShape);
 			_numFeatureMinScore = AddSingleNumericRow(featureGroup, "最小分数", 140, 0m, 1m, 2);
 
-			y += 220;
-			GroupBox resultGroup = AddGroup(parent, "4. 运行结果", y, 220);
+			y += 218;
+			GroupBox resultGroup = AddGroup(resultPage, "4. 运行结果", y, 220);
 			AddLabel(resultGroup, "统一公差(px)", 12, 30, 118);
 			_numTolerance = AddNumeric(resultGroup, 132, 26, 136, 0m, 9999m, 2);
 			_btnRun = AddButton(resultGroup, "运行检测", 280, 25, 122, 30, BtnRunOnClick);
@@ -210,15 +221,31 @@ namespace PcbPoseAlignInspect.Forms
 			_lblScore = AddResultLabel(resultGroup, "score(px)", 12, 180, "-");
 			_lblFeatureScore = AddResultLabel(resultGroup, "feature", 214, 96, "-");
 			_lblElapsed = AddResultLabel(resultGroup, "耗时(ms)", 214, 124, "-");
-			y += 230;
-			AddButton(parent, "确认配置", 10, y, 194, 36, BtnOkOnClick);
-			AddButton(parent, "取消", 218, y, 194, 36, delegate
+			y += 228;
+			AddButton(resultPage, "确认配置", 10, y, 194, 36, BtnOkOnClick);
+			AddButton(resultPage, "取消", 218, y, 194, 36, delegate
 			{
 				DialogResult = DialogResult.Cancel;
 				Close();
 			});
 
 			HookParameterChanged();
+		}
+
+		private void ApplyInitialSplitterDistance()
+		{
+			int availableWidth = _splitContainer.ClientSize.Width - _splitContainer.SplitterWidth;
+			if (availableWidth <= RightPanelWidth + 320)
+			{
+				return;
+			}
+
+			int rightWidth = Math.Min(RightPanelWidth, availableWidth - 320);
+			int splitterDistance = availableWidth - rightWidth;
+			if (splitterDistance > 0 && splitterDistance < _splitContainer.ClientSize.Width)
+			{
+				_splitContainer.SplitterDistance = splitterDistance;
+			}
 		}
 
 		private void BindRecipeToUi()
